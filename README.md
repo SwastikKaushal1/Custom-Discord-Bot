@@ -96,6 +96,14 @@ Make sure your bot is invited to both the main server and appeal server with nec
 | `?helpmod`    | 🛠️ Shows all moderator commands |
 
 ---
+## 🛠️ Known Issues
+
+### ⚠️ Channel Deletion Lag
+Sometimes, when the bot interacts with a channel (e.g., issuing warnings, managing tickets), Discord may delete the channel. However, there can be a slight delay before the bot recognizes that the channel is deleted. During this lag, the bot might attempt to interact with the deleted channel, causing an error.
+
+**Note:** This is a temporary issue due to the lag between Discord deleting the channel and the bot detecting the change. The bot will automatically ignore these errors and continue functioning normally without crashing.
+
+---
 
 ## 🧠 Notes
 
@@ -104,24 +112,29 @@ Make sure your bot is invited to both the main server and appeal server with nec
 - You must invite the bot with **message content** intent enabled.
 - Ban appeal tickets are handled in the appeal server via buttons.
 
+
+---
+
+## 🛠️ Technologies Used
+
+  [![Python](https://img.shields.io/badge/Python-3.8%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+
+  [![CSV](https://img.shields.io/badge/Database-CSV-blue?style=for-the-badge&logo=csv&logoColor=white)](https://www.csv.com/)
+---
+## Support
+
+For support, email swastik2022008@gmail.com  or join our [Discord Channel](https://discord.gg/UnNd95u3Fg)
+
 ---
 
 ## 🧊 Credits
 
 Made with ❤️ by [SwastikKaushal](https://github.com/SwastikKaushal1)  
-Discord: `swastik.op`
+[![Discord](https://img.shields.io/badge/Discord-7289DA?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/users/751334414914420767)  
+[![Instagram](https://img.shields.io/badge/Instagram-ff5e5b?style=for-the-badge&logo=instagram&logoColor=white)](https://www.instagram.com/swastikkaushal_/)
+[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://www.youtube.com/@DefenderXD)
+
+
 
 ---
 
-## 🖼️ Screenshots or GIFs (Optional)
-
-You can add GIFs or screenshots like this:
-
-```markdown
-![Bot Example](https://your-image-link)
-```
-
----
-
-Need me to plug in your actual server name/links or customize anything else? Just drop it here 💬
-```
