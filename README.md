@@ -42,9 +42,8 @@ pip install -r requirements.txt
 Open the bot file (e.g., `MAIN_BOT.py`) and scroll to the config section.
 
 You MUST fill out all the following variables with values from your server:
-
-```python
 # 🔧 Configuration — Fill These Out
+```
 GUILD_ID = 123456789  # Main Server ID
 APPEAL_SERVER_ID = 123456789  # Appeal Server ID
 ADMIN_LOG_CHANNEL_ID = 123456789  # Admin Logs Channel
@@ -66,6 +65,8 @@ BOT_COMMAND_ID = 123456789  # Level-up message channel
 setup_channel_id = 123456789  # Appeal setup channel (buttons)
 welcome_channel = 123456789  # Welcome channel ID
 SERVER_NAME = "Your Server Name"
+REACTION_CHANNEL_ID = 123456789  # Roles channel ID
+
 
 # 🏷️ Required Roles
 Banned_role = 123456789  # Role given to banned users
@@ -74,7 +75,20 @@ Appeal_role = 123456789  # Role given while appealing
 
 > 💡 Tip: Use Developer Mode in Discord to get IDs.
 
----
+### 4. 🎭 Using Custom Emojis in Embeds & Reactions
+
+This bot uses **custom emojis** for embed messages and self-role reactions.
+
+> ⚠️ You must upload the emojis to your **own server** and use the correct format to reference them in your config or code.
+
+#### ✅ Emoji Format
+
+Use the following formats:
+
+```
+<:emoji_name:emoji_id>         # For static emojis  
+<a:emoji_name:emoji_id>        # For animated emojis
+``` 
 
 ## 💡 Usage
 
