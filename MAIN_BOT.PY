@@ -61,6 +61,7 @@ NO_XP_ROLE_ID = 123456789  # Users with this role won't gain XP or be moderated
 BOT_COMMAND_ID = 123456789  # Channel where level-up messages will be sent
 setup_channel_id = 123456789  # Channel in the appeal server to send the appeal button
 welcome_channel = 1286649056252264489  # Channel where welcome messages are sent
+REACTION_CHANNEL_ID = 1351944866313273495 #Self Roles Channel
 SERVER_NAME = "Defender xD  की सेना"  # Name of your server for customization
 
 # These roles should also exist in your server
@@ -90,6 +91,19 @@ BAD_WORDS = {
     "asshole", "dumbass", "shithead", "dickhead", "retard", "cunt",
     "chutiya", "bhosdike", "madarchod", "behenchod", "lund", "gand", 
     "haraamzada", "randi", "kutta", "kamina", "gaand", "suar", "bakchodi"
+}
+
+# 👇 Define emojis and their role IDs here
+emoji_role_map = {
+    "<:bgmi:1354174612383994148>": 1354183320220602379,
+    "<:valorant:1354174622236676359>": 1354183395877589062,
+    "<:minecraft:1354174618923044956>": 1354183427968073769,
+    "<:cod:1354174616142090410>": 1354183518430953775,
+    "<:ps:1354174641861824572>": 1354183651465887885,
+    "<:AE:1354174629538697337>": 1354183686169301256,
+    "<:blender:1354174632810385529>": 1354183623594610798,
+    "<:male:1354174639349432361>": 1354183719685984276,
+    "<:female:1354174636178280569>": 1354183754683518986,
 }
 
 # Compiled regex for detecting bad words
@@ -455,13 +469,12 @@ async def rules(ctx):
     await ctx.message.delete()  
 
 
-#Work in progress (have to make some changes)
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def selfroles(ctx):
+async def selfrole(ctx):
     # First Embed - Image Only
     embed1 = discord.Embed(title="", color=discord.Color.from_rgb(255, 255, 255))
-    embed1.set_image(url="https://i.postimg.cc/VvhLkkCQ/self-roles.jpg")  # Replace with your own image URL
+    embed1.set_image(url="https://i.postimg.cc/VvhLkkCQ/self-roles.jpg")
     await ctx.send(embed=embed1)
 
     # Second Embed - Game Roles
@@ -476,7 +489,9 @@ async def selfroles(ctx):
         color=discord.Color.from_rgb(255, 255, 255)
     )
     embed2.set_footer(text="React to get your preferred game role!")
-    await ctx.send(embed=embed2)
+    msg2 = await ctx.send(embed=embed2)
+    for emoji in ["<:bgmi:1354174612383994148>", "<:valorant:1354174622236676359>", "<:minecraft:1354174618923044956>", "<:cod:1354174616142090410>"]:
+        await msg2.add_reaction(emoji)
 
     # Third Embed - Software Roles
     embed3 = discord.Embed(
@@ -488,8 +503,10 @@ async def selfroles(ctx):
         ),
         color=discord.Color.from_rgb(255, 255, 255)
     )
-    embed3.set_footer(text= "React to select the software you use!")
-    await ctx.send(embed=embed3)
+    embed3.set_footer(text="React to select the software you use!")
+    msg3 = await ctx.send(embed=embed3)
+    for emoji in ["<:ps:1354174641861824572>", "<:AE:1354174629538697337>", "<:blender:1354174632810385529>"]:
+        await msg3.add_reaction(emoji)
 
     # Fourth Embed - Gender Roles
     embed4 = discord.Embed(
@@ -500,32 +517,82 @@ async def selfroles(ctx):
         ),
         color=discord.Color.from_rgb(255, 255, 255)
     )
-    embed4.set_footer(text= "React to identify yourself!")
-    await ctx.send(embed=embed4)
+    embed4.set_footer(text="React to identify yourself!")
+    msg4 = await ctx.send(embed=embed4)
+    for emoji in ["<:male:1354174639349432361>", "<:female:1354174636178280569>"]:
+        await msg4.add_reaction(emoji)
 
-    await ctx.message.delete()  # Deletes the command message after sending
-
-#ignore
-async def test_embed(ctx, member: discord.Member = None):
-    welcome_channel_id = welcome_channel # Replace with your actual welcome channel ID
-    channel = member.guild.get_channel(welcome_channel_id)
+    await ctx.message.delete()
 
 
-    embed = discord.Embed(
-        title="<a:rocket_animated:1296099979961696329> Welcome to Defender xD  की सेना ",
-        description=f"Welcome  {member.mention} to Defender xD  की सेना.\n\n"
-                    "<a:Arrow_right:1351456353037586475> Make sure to read **Server Rules**.\n"
-                    "<a:Arrow_right:1351456353037586475> Explore the **https://discord.com/channels/1286631860197392396/1287005214049697822** and **https://discord.com/channels/1286631860197392396/1286638647936028774** channels.",
-        color=0xE6E6FA
-    )
-    avatar_url = member.avatar.url if member.avatar else member.default_avatar.url
+@bot.event
+async def on_raw_reaction_add(payload):
+    # Check if the reaction is in the correct channel
+    if payload.channel_id != REACTION_CHANNEL_ID:
+        return
 
-    embed.set_author(name=f"@{member.display_name}", icon_url=avatar_url)
-    embed.set_image(url="https://i.postimg.cc/RZJJMRTD/cropped-for-discord-server.jpg")  # Add a banner image if needed
-    embed.set_thumbnail(url="https://i.postimg.cc/mD5mFj0F/channels4-profile.jpg")
-    embed.set_footer(text="Enjoy your stay!")
+    emoji_str = str(payload.emoji)
+    role_id = emoji_role_map.get(emoji_str)
+    if role_id is None:
+        return
 
-    await channel.send(embed=embed)
+    # Get the guild and member who reacted
+    guild = bot.get_guild(payload.guild_id)
+    member = guild.get_member(payload.user_id)
+    if member is None or member.bot:
+        return
+
+    # Get the role to be assigned
+    role = guild.get_role(role_id)
+    if role:
+        await member.add_roles(role)
+        
+        # Log the role assignment in the log channel
+        log_channel = guild.get_channel(ADMIN_LOG_CHANNEL_ID)
+        if log_channel:
+            embed = discord.Embed(
+                title="Role Assigned",
+                description=f"**User:** {member.mention}\n**Role:** {role.name}",
+                color=discord.Color.green()
+            )
+            embed.set_footer(text=f"Assigned by: {member.display_name}")
+            await log_channel.send(embed=embed)
+
+
+@bot.event
+async def on_raw_reaction_remove(payload):
+    # Check if the reaction is in the correct channel
+    if payload.channel_id != REACTION_CHANNEL_ID:
+        return
+
+    emoji_str = str(payload.emoji)
+    role_id = emoji_role_map.get(emoji_str)
+    if role_id is None:
+        return
+
+    # Get the guild and member who removed the reaction
+    guild = bot.get_guild(payload.guild_id)
+    member = guild.get_member(payload.user_id)
+    if member is None or member.bot:
+        return
+
+    # Get the role to be removed
+    role = guild.get_role(role_id)
+    if role and role in member.roles:
+        await member.remove_roles(role)
+
+        # Log the role removal in the log channel
+        log_channel = guild.get_channel(ADMIN_LOG_CHANNEL_ID)
+        if log_channel:
+            embed = discord.Embed(
+                title="Role Removed",
+                description=f"**User:** {member.mention}\n**Role:** {role.name}",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text=f"Removed by: {member.display_name}")
+            await log_channel.send(embed=embed)
+
+
 
 #If the bot by chances restart then the buttons wont work for then its there (only for appeal ticket)
 @bot.command(name="unbanappeal")
