@@ -17,53 +17,74 @@ import os
 
 
 
-TOKEN="Place your Discord bot token here"
-intents = discord.Intents.all()  # Ensure all intents are enabled
+TOKEN = "Place your Discord bot token here"
+intents = discord.Intents.all()  # Enables all privileged and non-privileged intents
 
-# Initialize the bot, disabling the default help command 
-#If you want to change the command prefix just remove the ? and add any letter you want to change
+# Initialize the bot and disable the default help command
+# To change the command prefix, replace '?' with your desired symbol or letter
 bot = commands.Bot(command_prefix='?', intents=intents, help_command=None)
 
+# ========================== REQUIRED SETUP VARIABLES ==========================
 
-#If you dont know how to find  these data , see the read me file (which  you were supposed to read first :0 )
+# If you're unsure how to get these IDs, please refer to the README file (you *were* supposed to read it first 😐)
 
-#You need to fill all thhese colum with the respective commands for the discord bot to work
-GUILD_ID = 123456789  # Main Server ID (Used to setup Ban Appeals) 
-APPEAL_SERVER_ID = 123456789  # Appeal Server ID (Used to setup Ban Appeals) , where the banned guy will appeal and can create ticket
-ADMIN_LOG_CHANNEL_ID = 123456789  #The admin logs of all the commands of the discord bot (you will recieve all the logs here of the commands used or auto mods)
-TRANSCRIPT_CHANNEL_ID = 123456789 #Sends the transcript of  the support ticket of the ban appeal
-APPEAL_CATEGORY_ID = 123456789 #If a ticket is generated where should it generate (on the appeal server for the banned guy ) 
-MAIN_TICKET_CATEGORY_ID = 123456789 #If a ticket is generated where should it generate (on the main server for the admins ) 
-APPEAL_SERVER_INVITE = "appeal server link here" #Make a appeal serveR and create the invite link and add here 
-MAINSERVER="Main  server link here" 
-IGNORED_ROLES = {1286638864466841703, 1336694091085512704, 1353719582837440512, 1353718725718704180, 1351875347414650941, 1352201574663061524}  # Roles to ignore for yours AUTO MOD 
-BLOCKED_LINK_CHANNELS = {1286631860818153504, 1296057932093587526} #cHANNELS WHERE YOU DONT WANT LINKS TO BE THERE
-MODERATOR_ROLES = {1336694091085512704, 1353719582837440512, 1352201574663061524, 1351875347414650941} #Moderator roles who will be able to moderate the server and use some of the bot commands
-INSTA_NOTI_CHANNEL_ID=123456789 #Insta noti channel 
-BOOST_CHANNEL_ID = 123456789  # Replace with your channel ID where  you want to send boost messages
-BOOSTER_ROLE_ID = 123456789  # (Optional) Replace with your booster role ID
-NO_XP_ROLE_ID = 123456789  # Users with this role don't gain XP(right now auto mod wont work on these users if they have this role BEAWARE)
-BOT_COMMAND_ID= 123456789 #Channel where you want to send the level up messages
-setup_channel_id = 123456789 # A channel on your appeal server where it sends a button so banned guy can appeal
-welcome_channel=1286649056252264489 
-SERVER_NAME="Defender xD  की सेना"
+# IMPORTANT: You must configure ALL the following fields correctly for the bot to work as expected
 
-#Make these roles in your server too (banned, appeal is open )
-Banned_role=1353076332707188868
-Appeal_role=1352939183894691870
+GUILD_ID = 123456789  # Main server ID (used for Ban Appeals)
+APPEAL_SERVER_ID = 123456789  # Appeal server ID where banned users can appeal and open tickets
+ADMIN_LOG_CHANNEL_ID = 123456789  # Channel for logging all admin and bot command actions
+TRANSCRIPT_CHANNEL_ID = 123456789  # Channel where ticket transcripts will be sent
+APPEAL_CATEGORY_ID = 123456789  # Category in the appeal server where tickets should be created
+MAIN_TICKET_CATEGORY_ID = 123456789  # Category in the main server for admin-side tickets
+APPEAL_SERVER_INVITE = "appeal server link here"  # Invite link to your appeal server
+MAINSERVER = "Main server link here"  # Invite link to your main server
 
+# Roles that the auto-mod system should ignore
+IGNORED_ROLES = {
+    1286638864466841703, 1336694091085512704, 1353719582837440512,
+    1353718725718704180, 1351875347414650941, 1352201574663061524
+}
 
-#AUTO MODE CONDITIONS (ignore if no knowledge)
-SPAM_TIMEFRAME = 5  # Time window in seconds
-SPAM_MESSAGE_LIMIT = 5  # Max messages allowed in timeframe
-SPAM_WARNING_COOLDOWN = 5  # Seconds before another spam warning can be issued
-REPEATED_MESSAGE_LIMIT = 3  # Times a message can be repeated
-XP_PER_MESSAGE = 15
+# Channels where link posting is blocked
+BLOCKED_LINK_CHANNELS = {1286631860818153504, 1296057932093587526}
+
+# Moderator role IDs (used to authorize mod-level commands)
+MODERATOR_ROLES = {
+    1336694091085512704, 1353719582837440512,
+    1352201574663061524, 1351875347414650941
+}
+
+INSTA_NOTI_CHANNEL_ID = 123456789  # Channel for Instagram notifications
+BOOST_CHANNEL_ID = 123456789  # Channel for sending server boost messages
+BOOSTER_ROLE_ID = 123456789  # Role given to server boosters (optional)
+NO_XP_ROLE_ID = 123456789  # Users with this role won't gain XP or be moderated
+BOT_COMMAND_ID = 123456789  # Channel where level-up messages will be sent
+setup_channel_id = 123456789  # Channel in the appeal server to send the appeal button
+welcome_channel = 1286649056252264489  # Channel where welcome messages are sent
+SERVER_NAME = "Defender xD  की सेना"  # Name of your server for customization
+
+# These roles should also exist in your server
+Banned_role = 1353076332707188868  # Role assigned to banned users
+Appeal_role = 1352939183894691870  # Role assigned when a user is appealing
+
+# ========================== AUTO MOD CONFIGURATION ==========================
+
+# You can ignore this section if you're not familiar with how auto moderation works
+
+SPAM_TIMEFRAME = 5  # Seconds within which spam messages are counted
+SPAM_MESSAGE_LIMIT = 5  # Max messages allowed in the timeframe
+SPAM_WARNING_COOLDOWN = 5  # Cooldown before sending another spam warning
+REPEATED_MESSAGE_LIMIT = 3  # Max repeated messages allowed
+XP_PER_MESSAGE = 15  # XP given per valid message
+
+# Tracking dictionaries for spam detection and message analysis
 user_message_timestamps = {}
 user_last_warning = {}
 spam_warnings = {}  # {user_id: last_warning_time}
 user_messages = {}  # {user_id: [message_id1, message_id2, ...]}
-ticket_mappings = {} 
+ticket_mappings = {}  # Mapping of appeal tickets for cross-server communication
+
+# List of offensive words detected by the bot
 BAD_WORDS = {
     "ngga", "niga", "fck", "f***", "bitch", "bastard", "slut", "whore", 
     "asshole", "dumbass", "shithead", "dickhead", "retard", "cunt",
@@ -71,25 +92,25 @@ BAD_WORDS = {
     "haraamzada", "randi", "kutta", "kamina", "gaand", "suar", "bakchodi"
 }
 
+# Compiled regex for detecting bad words
 BAD_WORDS_REGEX = re.compile(r"\b(" + "|".join(re.escape(word) for word in BAD_WORDS) + r")\b", re.IGNORECASE)
 
+# ========================== FILES USED BY THE BOT ==========================
 
+CSV_FILE = "xp_data.csv"  # Stores XP data
+WARN_FILE = "warns.csv"  # Stores warning data
+LINK_REGEX = r"(https?:\/\/[^\s]+|www\.[^\s]+)"  # Regex to detect links
 
-#No need to touch
-CSV_FILE = "xp_data.csv"
-WARN_FILE = "warns.csv" #Name of csv file
-LINK_REGEX = r"(https?:\/\/[^\s]+|www\.[^\s]+)" #ignore
+# ========================== OPTIONAL NOTE FOR ADMINS ==========================
 
-
-
-
-
-# If you want to make admin only commands accesible to the moderator just add this line under @bot.command and remove this @commands.has_permissions(administrator=True)
+# If you want moderators to use admin-only commands:
+# Add this line under your command instead of requiring administrator permission:
 # @commands.check(lambda ctx: ctx.author.guild_permissions.administrator or any(role.id in MODERATOR_ROLES for role in ctx.author.roles))
+
  
 
 
-#Admin only commands -->
+# 👑 Admin-Only Commands (Accessible only to users with admin permissions)
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def ping(ctx):
@@ -722,8 +743,9 @@ async def ban_appeal(ctx):
         
 
 
-#AUTOMATED-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#Dont touch  these it has no use with you 
+# ========================== AUTOMATED SECTION ==========================
+# ⚠️ Do not modify this section — it's handled internally by the bot and requires no changes from your side.
+
 
 class TicketControls(View):
     def __init__(self, member, appeal_ticket, main_ticket, bot):
@@ -1255,7 +1277,8 @@ def generate_rank_card(username, avatar_url, level, rank, xp, xp_needed):
 
 
 
-#MODERATOR------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ 
+# ========================== MODERATOR SECTION ==========================
+# 🛡️ Commands and settings available to server moderators
 
 
 @bot.command()
@@ -1707,7 +1730,8 @@ async def custom_help(ctx):
     await ctx.send(embed=embed)
     await ctx.message.delete()
 
-#FOR NORMAL MEMBERS: -------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# ========================== MEMBER SECTION ==========================
+# 👥 Commands accessible to all regular server members
 
 @bot.tree.command(name="rank")
 async def rank(interaction: discord.Interaction, member: discord.Member = None):
@@ -1753,9 +1777,11 @@ async def leaderboard(interaction: discord.Interaction):
 
     # Send leaderboard as a response
     await interaction.response.send_message(embed=embed)
-#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-#Heart of the discord bot (Dont touch this.........)
+    
+# ========================== BOT CORE ==========================
+# ❤️ The heart of the Discord bot — do not touch this section!
+
 @bot.event
 async def on_message(message):
     if message.author.bot:
