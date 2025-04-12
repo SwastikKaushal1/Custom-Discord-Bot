@@ -138,6 +138,8 @@ Sometimes, when the bot interacts with a channel (e.g., issuing warnings, managi
 ## Support
 
 For support, email swastik2022008@gmail.com  or join our [Discord Channel](https://discord.gg/UnNd95u3Fg)
+If you want help with hosting (Paid hosting) i can help you set it up  or making a custom discord bot will be there to help you 
+
 
 ---
 
