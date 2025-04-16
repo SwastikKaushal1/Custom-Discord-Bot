@@ -234,6 +234,275 @@ async def custom_help(ctx):
     await ctx.message.delete()
 
 
+
+
+
+@bot.command(name='helpadminstatus')
+@commands.has_permissions(administrator=True)
+async def custom_help(ctx):
+    embed = discord.Embed(
+        title="Help - Available Commands",
+        description="Here are the commands you can use for status :",
+        color=discord.Color.from_rgb(255, 255, 255)
+    )
+
+    embed.add_field(
+        name="?setstatus livestream <link>",
+        value="Set the bot's status to 'Live on Stream!' with a link to your stream.",
+        inline=False
+    )
+    embed.add_field(
+        name="?setstatus video <link>",
+        value="Set the bot's status to watching the new video with link",
+        inline=False
+    )
+    embed.add_field(
+        name="?setstatus watching <content>",
+        value="Set the bot's status to 'Watching <content>' (e.g., Watching a movie).",
+        inline=False
+    )
+    embed.add_field(
+        name="?setstatus listening <content>",
+        value="Set the bot's status to 'Listening to <content>' (e.g., Listening to music).",
+        inline=False
+    )
+    embed.add_field(
+        name="?setstatus playing <game>",
+        value="Set the bot's status to 'Playing <game>' (e.g., Playing Fortnite).",
+        inline=False
+    )
+    embed.add_field(
+        name="?setstatus custom <content>",
+        value="Set a custom status for the bot (e.g., Custom message or status).",
+        inline=False
+    )
+    embed.add_field(
+        name="?setstatus idle",
+        value="Set the bot's status to 'Idle'. This status appears as if the bot is not actively online.",
+        inline=False
+    )
+    embed.add_field(
+        name="?setstatus dnd <content>",
+        value="Set the bot's status to 'Do Not Disturb' with a custom message (e.g., Do Not Disturb - Busy).",
+        inline=False
+    )
+    embed.add_field(
+        name="?setstatus invisible <content>",
+        value="Set the bot's status to 'Invisible'. The bot appears offline while still being able to interact.",
+        inline=False
+    )
+    
+    embed.timestamp = ctx.message.created_at
+    await ctx.send(embed=embed)
+    await ctx.message.delete()
+
+
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setstatus(ctx, mode: str, *, content):
+    log_channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID)
+
+    if mode.lower() == "livestream":
+        stream_title = "Live on Youtube!"
+        stream_url = content
+        activity = discord.Streaming(name=stream_title, url=stream_url)
+        await bot.change_presence(activity=activity)
+
+        button = Button(label="🎥 Watch Stream", url=stream_url, style=discord.ButtonStyle.link)
+        view = View()
+        view.add_item(button)
+
+        embed = discord.Embed(
+            title="📡 Bot Status Updated!",
+            description=f"Now streaming: **{stream_title}**",
+            color=discord.Color.purple()
+        )
+        await ctx.send(embed=embed, view=view, delete_after=3)
+        await ctx.message.delete()
+
+        if log_channel:
+            log_embed = discord.Embed(
+                title="🔧 Status Changed to Livestream",
+                description=f"**By:** {ctx.author.mention}\n**Stream URL:** [Click Here]({stream_url})",
+                color=discord.Color.purple()
+            )
+            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+            await log_channel.send(embed=log_embed)
+            await ctx.message.delete()
+
+    # Video status (new mode to watch a video)
+    elif mode.lower() == "video":
+        video_title = "New Video"
+        video_url = content
+        activity = discord.Streaming(name=video_title, url=video_url)
+        await bot.change_presence(activity=activity)
+
+        # Create a button
+        button = Button(label="▶️ Watch Video", url=video_url, style=discord.ButtonStyle.link)
+        view = View()
+        view.add_item(button)
+
+        embed = discord.Embed(
+            title="📺 Bot Status Updated!",
+            description=f"Now watching: **{video_title}**",
+            color=discord.Color.blue()
+        )
+        await ctx.send(embed=embed, view=view, delete_after=3)
+        await ctx.message.delete()
+
+    # Watching status
+    elif mode.lower() == "watching":
+        activity = discord.Activity(type=discord.ActivityType.watching, name=content)
+        await bot.change_presence(activity=activity)
+        await ctx.send(f"✅ Status updated to: Watching {content}")
+
+        # Log to admin channel
+        if log_channel:
+            log_embed = discord.Embed(
+                title="🔧 Status Changed to Watching",
+                description=f"**By:** {ctx.author.mention}\n**New Status:** Watching {content}",
+                color=discord.Color.green()
+            )
+            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+            await log_channel.send(embed=log_embed)
+            await ctx.message.delete()
+
+    # Listening status
+    elif mode.lower() == "listening":
+        activity = discord.Activity(type=discord.ActivityType.listening, name=content)
+        await bot.change_presence(activity=activity)
+        await ctx.send(f"✅ Status updated to: Listening to {content}")
+
+        # Log to admin channel
+        if log_channel:
+            log_embed = discord.Embed(
+                title="🔧 Status Changed to Listening",
+                description=f"**By:** {ctx.author.mention}\n**New Status:** Listening to {content}",
+                color=discord.Color.green()
+            )
+            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+            await log_channel.send(embed=log_embed)
+            await ctx.message.delete()
+
+    # Playing status
+    elif mode.lower() == "playing":
+        activity = discord.Game(name=content)
+        await bot.change_presence(activity=activity)
+        await ctx.send(f"✅ Status updated to: Playing {content}")
+
+        # Log to admin channel
+        if log_channel:
+            log_embed = discord.Embed(
+                title="🔧 Status Changed to Playing",
+                description=f"**By:** {ctx.author.mention}\n**New Status:** Playing {content}",
+                color=discord.Color.green()
+            )
+            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+            await log_channel.send(embed=log_embed)
+            await ctx.message.delete()
+
+    # Custom status
+    elif mode.lower() == "custom":
+        activity = discord.Activity(type=discord.ActivityType.custom, name=content)
+        await bot.change_presence(activity=activity)
+        await ctx.send(f"✅ Custom status set to: {content}")
+
+        # Log to admin channel
+        if log_channel:
+            log_embed = discord.Embed(
+                title="🔧 Custom Status Set",
+                description=f"**By:** {ctx.author.mention}\n**Custom Status:** {content}",
+                color=discord.Color.green()
+            )
+            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+            await log_channel.send(embed=log_embed)
+            await ctx.message.delete()
+
+    # Idle status (changes actual presence status)
+    elif mode.lower() == "idle":
+        activity = discord.Game(name=content)
+        await bot.change_presence(status=discord.Status.idle, activity=activity)
+        await ctx.send(f"✅ Status updated to: Idle - {content}")
+
+        # Log to admin channel
+        if log_channel:
+            log_embed = discord.Embed(
+                title="🔧 Status Changed to Idle",
+                description=f"**By:** {ctx.author.mention}\n**New Status:** Idle - {content}",
+                color=discord.Color.orange()
+            )
+            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+            await log_channel.send(embed=log_embed)
+            await ctx.message.delete()
+
+    # Do Not Disturb (DND) status (changes actual presence status)
+    elif mode.lower() == "dnd":
+        activity = discord.Game(name=content)
+        await bot.change_presence(status=discord.Status.dnd, activity=activity)
+        await ctx.send(f"✅ Status updated to: Do Not Disturb - {content}")
+
+        # Log to admin channel
+        if log_channel:
+            log_embed = discord.Embed(
+                title="🔧 Status Changed to DND",
+                description=f"**By:** {ctx.author.mention}\n**New Status:** DND - {content}",
+                color=discord.Color.red()
+            )
+            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+            await log_channel.send(embed=log_embed)
+            await ctx.message.delete()
+
+    # Invisible status (changes actual presence status)
+    elif mode.lower() == "invisible":
+        activity = discord.Game(name=content)
+        await bot.change_presence(status=discord.Status.invisible, activity=activity)
+        await ctx.send(f"✅ Status updated to: Invisible - {content}")
+
+        # Log to admin channel
+        if log_channel:
+            log_embed = discord.Embed(
+                title="🔧 Status Changed to Invisible",
+                description=f"**By:** {ctx.author.mention}\n**New Status:** Invisible - {content}",
+                color=discord.Color.dark_gray()
+            )
+            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+            await log_channel.send(embed=log_embed)
+            await ctx.message.delete()
+
+    else:
+        await ctx.send("❌ Invalid status mode! Use `?setstatushelp` for a list of available modes.",delete_after=5)
+
+    await ctx.message.delete()
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def clearstatus(ctx):
+    await bot.change_presence(activity=None, status=discord.Status.online)
+    
+    embed = discord.Embed(
+        title="✅ Status Cleared",
+        description="The bot's status has been reset to default.",
+        color=discord.Color.red()
+    )
+    await ctx.send(embed=embed,delete_after=3)
+    await ctx.message.delete()
+
+
+    # Log to admin channel
+    log_channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID)
+    if log_channel:
+        log_embed = discord.Embed(
+            title="🔻 Bot Status Cleared",
+            description=f"**By:** {ctx.author.mention}",
+            color=discord.Color.red()
+        )
+        log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+        await log_channel.send(embed=log_embed)
+
+
 #Resets the exp of the user
 @bot.command(name="reset")
 @commands.has_permissions(administrator=True)
