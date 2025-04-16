@@ -241,7 +241,7 @@ async def custom_help(ctx):
 @commands.has_permissions(administrator=True)
 async def custom_help(ctx):
     embed = discord.Embed(
-        title="Help - Available Commands",
+        title="Help - Available Status Commands",
         description="Here are the commands you can use for status :",
         color=discord.Color.from_rgb(255, 255, 255)
     )
