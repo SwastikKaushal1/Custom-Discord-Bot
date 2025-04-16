@@ -13,6 +13,8 @@ import requests
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 import os
+import aiofiles
+
 
 
 
@@ -67,6 +69,29 @@ SERVER_NAME = "Defender xD  की सेना"  # Name of your server for cust
 # These roles should also exist in your server
 Banned_role = 1353076332707188868  # Role assigned to banned users
 Appeal_role = 1352939183894691870  # Role assigned when a user is appealing
+
+
+
+# TICKET_CHANNEL_ID: The channel where the embed is sent (such as a 'ticket creation' or 'support notification' channel)
+TICKET_CHANNEL_ID = 1346130286626472040  # Replace with the channel where embed is sent
+
+# TICKET_CATEGORY_ID: The ID of the category where ticket channels should be created. It helps in organizing ticket channels.
+TICKET_CATEGORY_ID = 1346130175905103882  # Category where ticket channels go
+
+# TRANSCRIPT_LOG_CHANNEL_ID: The ID of the channel where the transcript of tickets will be sent. 
+# This could be an admin channel where all ticket transcriptions are logged.
+TRANSCRIPT_LOG_CHANNEL_ID = 1352199804570304583
+
+# SUPPORT_ROLES: Set of role IDs that represent the support team. 
+# Members with these roles will have access to the ticket channels (read messages, send messages).
+SUPPORT_ROLES = {1353258424149741629, 1336694091085512704, 1352201574663061524, 1353719582837440512}
+
+# Example usage (for context):
+# - When creating a ticket, this category and these support roles will be used.
+# - The TICKET_CHANNEL_ID will be where notifications or embeds related to tickets are sent.
+# - The TICKET_CATEGORY_ID ensures all ticket channels go into a specific category.
+# - The SUPPORT_ROLES ensures only specific members can access the ticket channels.
+
 
 # ========================== AUTO MOD CONFIGURATION ==========================
 
@@ -1079,6 +1104,70 @@ async def ban_appeal(ctx):
         
 
 
+
+@bot.command()
+@commands.check(lambda ctx: ctx.author.guild_permissions.administrator or any(role.id in SUPPORT_ROLES for role in ctx.author.roles))
+async def close_ticketsupp(ctx):
+    ticket_channel = ctx.channel  # Get the ticket channel
+
+    # Check if the channel is a valid ticket channel (e.g., starts with "ticket-")
+    if not ticket_channel.name.startswith("ticket-"):
+        await ctx.send("❌ This is not a valid ticket channel.")
+        return
+
+    # Ensure that the user has permission to manage channels (staff/owners)
+    if not ctx.author.guild_permissions.manage_channels:
+        await ctx.send("❌ You do not have permission to close this ticket.", ephemeral=True)
+        return
+
+    # Lock the ticket: remove view/send access from everyone except staff
+    overwrites = ticket_channel.overwrites
+
+    # Revoke permission for everyone except staff and the bot
+    for target in overwrites:
+        if isinstance(target, discord.Member) or isinstance(target, discord.User):
+            # Revoke for individual users (e.g., ticket opener)
+            overwrites[target].read_messages = False
+            overwrites[target].send_messages = False
+
+    # Re-apply updated overwrites
+    await ticket_channel.edit(overwrites=overwrites)
+
+    # Send staff controls
+    embed = discord.Embed(
+        title="Support team ticket controls",
+        description="The ticket is now closed. Use the buttons below to manage it.",
+        color=discord.Color.dark_gray()
+    )
+    await ticket_channel.send(embed=embed, view=TicketControlView())
+
+
+# Define the command to add a user to the ticket
+@bot.command()
+@commands.check(lambda ctx: ctx.author.guild_permissions.administrator or any(role.id in SUPPORT_ROLES for role in ctx.author.roles))
+async def add_usersupp(ctx, user_id: int):
+    ticket_channel = ctx.channel  # Get the ticket channel
+
+    # Check if the channel is a valid ticket channel (e.g., starts with "ticket-")
+    if not ticket_channel.name.startswith("ticket-"):
+        await ctx.send("❌ This is not a valid ticket channel.")
+        return
+
+    # Ensure that the user has permission to manage channels (staff/owners)
+    if not ctx.author.guild_permissions.manage_channels:
+        await ctx.send("❌ You do not have permission to add a user.", ephemeral=True)
+        return
+
+    try:
+        # Fetch the user by ID and grant them access to the ticket channel
+        user = await bot.fetch_user(user_id)
+        await ticket_channel.set_permissions(user, read_messages=True, send_messages=True)
+        await ticket_channel.send(f"👋 Welcome {user.mention}, you've been added to this ticket.")
+    except discord.NotFound:
+        await ctx.send("❌ User not found. Please check the ID.")
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 # ========================== AUTOMATED SECTION ==========================
 # ⚠️ Do not modify this section — it's handled internally by the bot and requires no changes from your side.
 
@@ -1316,6 +1405,9 @@ async def on_ready():
     await bot.tree.sync() 
     print(f"✅ Synced Slash Commands! Logged in as {bot.user}")
     await send_appeal_message()
+    await send_ticket_embed()  # 👈 We just call it here
+    for guild in bot.guilds:
+        await notify_ticket_channels_on_restart(guild)
     if setup_channel_id:
         setup_channel = bot.get_channel(setup_channel_id)
         if setup_channel:
@@ -1400,8 +1492,6 @@ async def on_member_join(member):
     except Exception as e:
         print(f"Unexpected error: {e}")
     
-    if member.guild.id == GUILD_ID:  # Ensure it's the main server
-        await test_embed(None, member)  # Call your function
 
 
 
@@ -1610,6 +1700,366 @@ def generate_rank_card(username, avatar_url, level, rank, xp, xp_needed):
     img_path = "rank_card.png"
     img.save(img_path)
     return img_path
+
+
+
+class TicketView(discord.ui.View):
+    @discord.ui.button(label="🎫 Create Ticket", style=discord.ButtonStyle.green, custom_id="create_ticket")
+    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild = interaction.guild
+        user = interaction.user
+        category = discord.utils.get(guild.categories, id=TICKET_CATEGORY_ID)
+
+        # Check if ticket already exists
+        existing_channel = discord.utils.get(guild.channels, name=f"ticket-{user.id}")
+        if existing_channel:
+            await interaction.response.send_message("❗ You already have an open ticket.", ephemeral=True)
+            return
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True)
+        }
+
+        for role_id in SUPPORT_ROLES:
+            role = guild.get_role(role_id)
+            if role:
+                overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+        # Create ticket channel in the specified category with the user ID as part of the name
+        ticket_channel = await guild.create_text_channel(
+            name=f"ticket-{user.id}",
+            overwrites=overwrites,
+            category=category,
+            reason="Support ticket created"
+        )
+
+        await interaction.response.send_message(f"✅ Your ticket has been created: {ticket_channel.mention}", ephemeral=True)
+
+        # Send the Staff View to the ticket channel after creation
+        view = TicketStaffView(ticket_channel)
+
+
+        # Create the embed for the ticket management
+        embed = discord.Embed(
+            description="Support will be with you shortly.\nAdmins can control the ticket using the buttons below.",
+            color=discord.Color.green(),
+            timestamp=datetime.utcnow()
+        )
+        embed.set_footer(text="Support Team • Defender_XD")
+
+        # Send the embed along with the view for buttons
+        await ticket_channel.send(f"Welcome! <@{user.id}>",embed=embed, view=view)
+
+
+class TicketStaffView(discord.ui.View):
+    def __init__(self, ticket_channel: discord.TextChannel):
+        super().__init__()
+        self.ticket_channel = ticket_channel
+
+    @discord.ui.button(label="❌ Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket")
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ You do not have permission to close this ticket.", ephemeral=True)
+            return
+
+        # Lock the ticket: remove view/send access from everyone except staff and bot
+        overwrites = self.ticket_channel.overwrites
+
+        # Revoke permission for individual users (ticket creator, etc.)
+        for target in list(overwrites.keys()):
+            if isinstance(target, discord.Member) or isinstance(target, discord.User):
+                overwrites[target].read_messages = False
+                overwrites[target].send_messages = False
+
+        # Keep support roles and bot access
+        for role_id in SUPPORT_ROLES:
+            role = self.ticket_channel.guild.get_role(role_id)
+            if role:
+                overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+        # Ensure bot always has access
+        overwrites[self.ticket_channel.guild.me] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+        # Apply the updated overwrites
+        await self.ticket_channel.edit(overwrites=overwrites)
+
+
+        # Send staff controls
+        embed = discord.Embed(
+            title="Support team ticket controls",
+            description="The ticket is now closed. Use the buttons below to manage it.",
+            color=discord.Color.dark_gray()
+        )
+        await self.ticket_channel.send(embed=embed, view=TicketControlView())
+
+        await interaction.response.send_message("✅ The ticket has been locked. Only staff can view it now.", ephemeral=True)
+
+    @discord.ui.button(label="➕ Add User", style=discord.ButtonStyle.blurple, custom_id="add_user")
+    async def add_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ You do not have permission to add a user.", ephemeral=True)
+            return
+
+        # Modal Class (defined inside the method for context)
+        class AddUserModal(discord.ui.Modal, title="Add User to Ticket"):
+            def __init__(modal_self, ticket_channel):
+                super().__init__()
+                modal_self.ticket_channel = ticket_channel
+                modal_self.user_id = discord.ui.TextInput(
+                    label="Enter User ID",
+                    placeholder="123456789012345678",
+                    required=True
+                )
+                modal_self.add_item(modal_self.user_id)
+
+            async def on_submit(modal_self, modal_interaction: discord.Interaction):
+                user_id = modal_self.user_id.value.strip()
+                try:
+                    user = await bot.fetch_user(int(user_id))
+                    await modal_self.ticket_channel.set_permissions(user, read_messages=True, send_messages=True)
+                    await modal_self.ticket_channel.send(f"👋 Welcome {user.mention}, you've been added to this ticket.")
+                    await modal_interaction.response.send_message(f"✅ {user.mention} added successfully!")
+                except discord.NotFound:
+                    await modal_interaction.response.send_message("❌ User not found. Please check the ID.", ephemeral=True)
+                except Exception as e:
+                    await modal_interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
+        # Show modal to the staff member
+        await interaction.response.send_modal(AddUserModal(self.ticket_channel))
+
+
+
+
+
+async def create_transcript(channel: discord.TextChannel) -> str:
+    # Use an async generator to collect all messages
+    messages = []
+    async for msg in channel.history(limit=None, oldest_first=True):
+        messages.append(msg)
+
+    filename = f"transcript-{channel.name}.txt"
+    filepath = f"./{filename}"
+
+    # Create a text file and write all messages to it
+    async with aiofiles.open(filepath, mode='w', encoding='utf-8') as f:
+        for msg in messages:
+            time = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            await f.write(f"{msg.author} [{time}]: {msg.content}\n")
+
+    return filepath, len(messages)
+
+
+async def send_transcript_log(channel: discord.TextChannel, moderator: discord.Member, ticket_owner: discord.Member):
+    # Generate the transcript file and count messages
+    transcript_path, msg_count = await create_transcript(channel)
+    file = discord.File(transcript_path, filename=os.path.basename(transcript_path))
+
+    # Create the embed to be sent first
+    embed = discord.Embed(
+        title="🎟️ Ticket Closed",
+        color=discord.Color.dark_gray(),
+        timestamp=datetime.utcnow()
+    )
+    embed.set_author(name=moderator.display_name, icon_url=moderator.display_avatar.url)
+    embed.add_field(name="Ticket Owner", value=f"{ticket_owner.mention}", inline=True)
+    embed.add_field(name="Ticket Name", value=channel.name, inline=True)
+    embed.add_field(name="Panel Name", value="Support Tickets", inline=True)
+    embed.add_field(name="Direct Transcript", value="Use Button", inline=True)
+    embed.add_field(name="Users in transcript", value=f"{msg_count} – {bot.user.mention} - {bot.user}", inline=False)
+    embed.set_footer(text=f"Channel ID: {channel.id} | Server: {channel.guild.name}")
+
+    # Send the embed first
+    log_channel = bot.get_channel(TRANSCRIPT_LOG_CHANNEL_ID)
+    await log_channel.send(embed=embed)
+
+    # Send the .txt file after the embed
+    await log_channel.send(file=file)
+
+    # Optional cleanup of the .txt file after sending it
+    os.remove(transcript_path)
+
+
+
+
+class TicketControlView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # Disable timeout so it stays
+
+    @discord.ui.button(label="Transcript", style=discord.ButtonStyle.gray, emoji="📄", custom_id="transcript_btn")
+    async def transcript(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Get the current channel (the ticket channel)
+        channel = interaction.channel
+
+        # Ensure the channel name follows the 'ticket-<user_id>' format
+        if channel.name.startswith("ticket-"):
+            # Extract the user ID from the channel name
+            user_id_str = channel.name.split('-')[1]  # e.g., "ticket-123456789012345678"
+            try:
+                ticket_owner_id = int(user_id_str)
+            except ValueError:
+                await interaction.response.send_message("Invalid ticket owner ID format.", ephemeral=True)
+                return
+            
+            # Try to get the ticket owner (user) from the cache
+            ticket_owner = channel.guild.get_member(ticket_owner_id)
+
+            if not ticket_owner:
+                # If the member isn't cached, attempt to fetch them
+                try:
+                    ticket_owner = await channel.guild.fetch_member(ticket_owner_id)
+                except discord.NotFound:
+                    await interaction.response.send_message("Ticket owner not found.", ephemeral=True)
+                    return
+
+            moderator = interaction.user  # The user interacting with the button
+
+            # Send transcript log to the desired channel (e.g., ticket log channel)
+            await send_transcript_log(channel, moderator, ticket_owner)
+
+            # Send a response to the user
+            await interaction.response.send_message("Transcript has been sent to the log channel!", ephemeral=True)
+
+
+    @discord.ui.button(label="Open", style=discord.ButtonStyle.blurple, emoji="🔓", custom_id="open_btn")
+    async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ticket_channel = interaction.channel  # Get the ticket channel
+        
+        # Check if the ticket channel exists and follows naming convention (if necessary)
+        if ticket_channel.name.startswith("ticket-"):  # Adjust this as per your ticket channel naming convention
+            # Get the ticket owner from the channel name (assuming it's based on the user ID)
+            ticket_owner = None
+            user_id_str = ticket_channel.name.split('-')[1]  # Assuming the name format is ticket-<user_id>
+            try:
+                ticket_owner = await ticket_channel.guild.fetch_member(int(user_id_str))
+            except discord.NotFound:
+                ticket_owner = None
+            
+            # Prepare permission overwrites for the channel (open it)
+            overwrites = {
+                ticket_channel.guild.default_role: discord.PermissionOverwrite(read_messages=False),  # Default role cannot read
+                ticket_owner: discord.PermissionOverwrite(read_messages=True),  # Allow the ticket owner to see the ticket
+            }
+
+
+
+            # Update the channel permissions
+            await ticket_channel.edit(overwrites=overwrites)
+
+            # Send confirmation message
+            await interaction.response.send_message(f"The ticket `{ticket_channel.name}` has been opened!", ephemeral=True)
+
+
+            await ticket_channel.send(f"Your ticket has been opened. You can now interact with it. {ticket_owner.mention}")            
+            # Remove both the embed and the buttons from the message by editing it with a plain message
+            await interaction.message.edit(content="The ticket is now open and accessible.", embed=None, view=None)
+
+        else:
+            # If it's not a valid ticket channel
+            await interaction.response.send_message("This is not a valid ticket channel to open.", ephemeral=True)
+
+
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.red, emoji="⛔", custom_id="delete_btn")
+    async def delete_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Get the channel where the ticket exists (interaction.channel)
+        ticket_channel = interaction.channel
+        
+        # Check if the channel is indeed a ticket channel (you could use naming convention or some other way to check)
+        if ticket_channel.name.startswith("ticket-"):  # Adjust this condition as needed
+            # Send a message with Yes/No buttons for confirmation
+            confirm_view = discord.ui.View()
+
+            # Yes button for confirming deletion
+            yes_button = discord.ui.Button(label="Yes", style=discord.ButtonStyle.green, custom_id="confirm_delete")
+            # No button for canceling deletion
+            no_button = discord.ui.Button(label="No", style=discord.ButtonStyle.red, custom_id="cancel_delete")
+
+            confirm_view.add_item(yes_button)
+            confirm_view.add_item(no_button)
+
+            # Send the confirmation message with buttons
+            await interaction.response.send_message(
+                f"Are you sure you want to delete the ticket `{ticket_channel.name}`? This action cannot be undone.",
+                view=confirm_view,
+                ephemeral=True
+            )
+
+            # Define the callback for the 'Yes' button
+            async def confirm_delete(interaction: discord.Interaction):
+                await ticket_channel.delete()
+                await interaction.response.send_message(f"The ticket `{ticket_channel.name}` has been deleted.", ephemeral=True)
+            
+            # Define the callback for the 'No' button
+            async def cancel_delete(interaction: discord.Interaction):
+                await interaction.response.send_message("Ticket deletion canceled.", ephemeral=True)
+
+            # Attach the callbacks to the buttons
+            yes_button.callback = confirm_delete
+            no_button.callback = cancel_delete
+
+        else:
+            # If it's not a ticket channel, just notify the user
+            await interaction.response.send_message("This is not a valid ticket channel for deletion.", ephemeral=True)
+
+
+
+async def notify_ticket_channels_on_restart(guild: discord.Guild):
+    # Get the ticket category
+    category = discord.utils.get(guild.categories, id=TICKET_CATEGORY_ID)
+    if not category:
+        print("Ticket category not found.")
+        return
+
+    # Loop through channels in this category
+    for channel in category.text_channels:
+        if channel.name.startswith("ticket-"):
+            try:
+                # Create the embed message
+                embed = discord.Embed(
+                    title="🔁 Bot Restart Detected",
+                    description=(
+                        "Sorry admins! The bot has been restarted.\n\n"
+                        "**Please use the manual commands below to manage this ticket:**\n"
+                        "🔸 `?close_ticketsupp`\n"
+                        "🔸 `?add_usersupp`"
+                    ),
+                    color=discord.Color.orange()
+                )
+                embed.set_footer(text="Support Team • Defender_XD")
+
+                # Send the message
+                await channel.send(embed=embed)
+
+            except Exception as e:
+                print(f"Failed to notify {channel.name}: {e}")
+
+
+
+
+async def send_ticket_embed():
+    channel = bot.get_channel(TICKET_CHANNEL_ID)
+    guild = bot.get_guild(1286631860197392396)  # Replace with your actual server ID
+
+    if channel and guild:
+        await channel.purge(limit=100)  # Clear previous embeds/messages
+
+        embed = discord.Embed(
+            title="📩 Need Support?",
+            description=(
+                "**If you're experiencing issues or have questions, click the button below to open a private support ticket.**\n\n"
+                "Our team will assist you shortly. Please be respectful and provide as much detail as possible. 🤝\n\n"
+            ),
+            color=discord.Color.teal()
+        )
+        embed.set_footer(text="Support Team • Defender_XD")
+        embed.set_thumbnail(url=guild.icon.url if guild.icon else discord.Embed.Empty)
+
+        await channel.send(embed=embed, view=TicketView())
+    else:
+        print("❌ Could not find the ticket channel or guild.")
+
+
 
 
 
