@@ -1703,7 +1703,10 @@ def generate_rank_card(username, avatar_url, level, rank, xp, xp_needed):
 
 
 
+
 class TicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
     @discord.ui.button(label="🎫 Create Ticket", style=discord.ButtonStyle.green, custom_id="create_ticket")
     async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
