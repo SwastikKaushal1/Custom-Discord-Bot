@@ -14,6 +14,8 @@ from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 import os
 import aiofiles
+from discord.errors import HTTPException
+
 
 
 
@@ -40,6 +42,11 @@ APPEAL_CATEGORY_ID = 123456789  # Category in the appeal server where tickets sh
 MAIN_TICKET_CATEGORY_ID = 123456789  # Category in the main server for admin-side tickets
 APPEAL_SERVER_INVITE = "appeal server link here"  # Invite link to your appeal server
 MAINSERVER = "Main server link here"  # Invite link to your main server
+VC_CATEGORY_ID = 123456789  # ID of the category where temporary voice channels will be created
+PANEL_CHANNEL_ID = 123456789  # ID of the text channel where the control panel will be displayed
+JOIN_CHANNEL_NAME = "➕ Join to Create"  # Name of the voice channel users join to trigger VC creation
+
+
 
 # Roles that the auto-mod system should ignore
 IGNORED_ROLES = {
@@ -109,6 +116,10 @@ user_last_warning = {}
 spam_warnings = {}  # {user_id: last_warning_time}
 user_messages = {}  # {user_id: [message_id1, message_id2, ...]}
 ticket_mappings = {}  # Mapping of appeal tickets for cross-server communication
+user_vcs = {}  # Dictionary to store the user's temporary voice channels
+panel_message_id = None  # ID for the control panel message, initially set to None
+banned_users = {}  # Dictionary to keep track of banned users in the VC
+
 
 # List of offensive words detected by the bot
 BAD_WORDS = {
@@ -248,11 +259,15 @@ async def custom_help(ctx):
         inline=False
     )
     embed.add_field(
-        name="?addxp <@user> ",
+        name="?addexp <@user> ",
         value=f"Adds exp to the user   .",
         inline=False
     )
-
+    embed.add_field(
+        name="?setstatus <Status>  or ?setstatus livestream <link>",
+        value=f"Changes the status of the bot  .",
+        inline=False
+    )
     
     embed.timestamp = ctx.message.created_at
     await ctx.send(embed=embed)
@@ -329,12 +344,14 @@ async def custom_help(ctx):
 async def setstatus(ctx, mode: str, *, content):
     log_channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID)
 
+    # Livestream status
     if mode.lower() == "livestream":
         stream_title = "Live on Youtube!"
         stream_url = content
         activity = discord.Streaming(name=stream_title, url=stream_url)
         await bot.change_presence(activity=activity)
 
+        # Create a button
         button = Button(label="🎥 Watch Stream", url=stream_url, style=discord.ButtonStyle.link)
         view = View()
         view.add_item(button)
@@ -349,19 +366,24 @@ async def setstatus(ctx, mode: str, *, content):
 
         if log_channel:
             log_embed = discord.Embed(
-                title="🔧 Status Changed to Livestream",
-                description=f"**By:** {ctx.author.mention}\n**Stream URL:** [Click Here]({stream_url})",
+                title="Status Changed to Livestream",
+                description=(
+                    f">>> **By:** {ctx.author.mention}\n"
+                    f"**Stream URL:** [Click Here]({stream_url})"
+                ),
                 color=discord.Color.purple()
             )
-            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+
+            log_embed.set_footer(
+                text=f"{ctx.me.name}#{ctx.me.discriminator} • {datetime.now().strftime('%I:%M %p')}"
+            )
             await log_channel.send(embed=log_embed)
-            await ctx.message.delete()
 
     # Video status (new mode to watch a video)
     elif mode.lower() == "video":
-        video_title = "New Video"
+        video_title = "Watching New Video"
         video_url = content
-        activity = discord.Streaming(name=video_title, url=video_url)
+        activity = discord.Activity(type=discord.ActivityType.watching, name=video_title)
         await bot.change_presence(activity=activity)
 
         # Create a button
@@ -371,9 +393,17 @@ async def setstatus(ctx, mode: str, *, content):
 
         embed = discord.Embed(
             title="📺 Bot Status Updated!",
-            description=f"Now watching: **{video_title}**",
-            color=discord.Color.blue()
+            description=(
+                f">>> **Now watching:** **{video_title}**\n"
+                f"**Updated by:** {ctx.author.display_name}"
+            ),
+            color=discord.Color.purple()  # Default purple color
         )
+
+        embed.set_footer(
+            text=f"{ctx.author.display_name} •{datetime.now().strftime('%I:%M %p')}"
+        )
+
         await ctx.send(embed=embed, view=view, delete_after=3)
         await ctx.message.delete()
 
@@ -387,10 +417,17 @@ async def setstatus(ctx, mode: str, *, content):
         if log_channel:
             log_embed = discord.Embed(
                 title="🔧 Status Changed to Watching",
-                description=f"**By:** {ctx.author.mention}\n**New Status:** Watching {content}",
-                color=discord.Color.green()
+                description=(
+                    f">>> **By:** {ctx.author.mention}\n"
+                    f"**New Status:** Watching {content}"
+                ),
+                color=discord.Color.purple()  # Using purple as the default color
             )
-            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+
+            log_embed.set_footer(
+                text=f"{ctx.author.display_name} • {datetime.now().strftime('%I:%M %p')}"
+            )
+
             await log_channel.send(embed=log_embed)
             await ctx.message.delete()
 
@@ -404,10 +441,17 @@ async def setstatus(ctx, mode: str, *, content):
         if log_channel:
             log_embed = discord.Embed(
                 title="🔧 Status Changed to Listening",
-                description=f"**By:** {ctx.author.mention}\n**New Status:** Listening to {content}",
-                color=discord.Color.green()
+                description=(
+                    f">>> **By:** {ctx.author.mention}\n"
+                    f"**New Status:** Listening to {content}"
+                ),
+                color=discord.Color.purple()  # Using purple as the default color
             )
-            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+
+            log_embed.set_footer(
+                text=f"{ctx.author.display_name} • {datetime.now().strftime('%I:%M %p')}"
+            )
+
             await log_channel.send(embed=log_embed)
             await ctx.message.delete()
 
@@ -421,10 +465,17 @@ async def setstatus(ctx, mode: str, *, content):
         if log_channel:
             log_embed = discord.Embed(
                 title="🔧 Status Changed to Playing",
-                description=f"**By:** {ctx.author.mention}\n**New Status:** Playing {content}",
-                color=discord.Color.green()
+                description=(
+                    f">>> **By:** {ctx.author.mention}\n"
+                    f"**New Status:** Playing {content}"
+                ),
+                color=discord.Color.purple()  # Using purple as the default color
             )
-            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+
+            log_embed.set_footer(
+                text=f"{ctx.author.display_name} • {datetime.now().strftime('%I:%M %p')}"
+            )
+
             await log_channel.send(embed=log_embed)
             await ctx.message.delete()
 
@@ -438,10 +489,16 @@ async def setstatus(ctx, mode: str, *, content):
         if log_channel:
             log_embed = discord.Embed(
                 title="🔧 Custom Status Set",
-                description=f"**By:** {ctx.author.mention}\n**Custom Status:** {content}",
-                color=discord.Color.green()
+                description=(
+                    f">>> **By:** {ctx.author.mention}\n"
+                    f"**Custom Status:** {content}"
+                ),
+                color=discord.Color.purple()  # Using purple as the default color
             )
-            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+
+            log_embed.set_footer(
+                text=f"{ctx.author.display_name} • {datetime.now().strftime('%I:%M %p')}"
+            )
             await log_channel.send(embed=log_embed)
             await ctx.message.delete()
 
@@ -455,10 +512,17 @@ async def setstatus(ctx, mode: str, *, content):
         if log_channel:
             log_embed = discord.Embed(
                 title="🔧 Status Changed to Idle",
-                description=f"**By:** {ctx.author.mention}\n**New Status:** Idle - {content}",
-                color=discord.Color.orange()
+                description=(
+                    f">>> **By:** {ctx.author.mention}\n"
+                    f"**New Status:** Idle - {content}"
+                ),
+                color=discord.Color.purple()  # Using purple as the default color
             )
-            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+
+            log_embed.set_footer(
+                text=f"{ctx.author.display_name} •  • {datetime.now().strftime('%I:%M %p')}"
+            )
+
             await log_channel.send(embed=log_embed)
             await ctx.message.delete()
 
@@ -472,10 +536,17 @@ async def setstatus(ctx, mode: str, *, content):
         if log_channel:
             log_embed = discord.Embed(
                 title="🔧 Status Changed to DND",
-                description=f"**By:** {ctx.author.mention}\n**New Status:** DND - {content}",
-                color=discord.Color.red()
+                description=(
+                    f">>> **By:** {ctx.author.mention}\n"
+                    f"**New Status:** DND - {content}"
+                ),
+                color=discord.Color.purple()  # Using purple as the default color
             )
-            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+
+            log_embed.set_footer(
+                text=f"{ctx.author.display_name} •• {datetime.now().strftime('%I:%M %p')}"
+            )
+
             await log_channel.send(embed=log_embed)
             await ctx.message.delete()
 
@@ -489,10 +560,16 @@ async def setstatus(ctx, mode: str, *, content):
         if log_channel:
             log_embed = discord.Embed(
                 title="🔧 Status Changed to Invisible",
-                description=f"**By:** {ctx.author.mention}\n**New Status:** Invisible - {content}",
-                color=discord.Color.dark_gray()
+                description=(
+                    f">>> **By:** {ctx.author.mention}\n"
+                    f"**New Status:** Invisible - {content}"
+                ),
+                color=discord.Color.purple()  # Using purple as the default color
             )
-            log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+
+            log_embed.set_footer(
+                text=f"{ctx.author.display_name} • • {datetime.now().strftime('%I:%M %p')}"
+            )
             await log_channel.send(embed=log_embed)
             await ctx.message.delete()
 
@@ -520,11 +597,15 @@ async def clearstatus(ctx):
     log_channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID)
     if log_channel:
         log_embed = discord.Embed(
-            title="🔻 Bot Status Cleared",
-            description=f"**By:** {ctx.author.mention}",
-            color=discord.Color.red()
+            title=" Bot Status Cleared",
+            description=f">>> **By:** {ctx.author.mention}",
+            color=discord.Color.purple()  # Using purple as the default color
         )
-        log_embed.set_footer(text=f"User ID: {ctx.author.id}")
+
+        log_embed.set_footer(
+            text=f"{ctx.author.display_name} •  {datetime.now().strftime('%I:%M %p')}"
+        )
+
         await log_channel.send(embed=log_embed)
 
 
@@ -542,15 +623,24 @@ async def reset(ctx, member: discord.Member):
         if log_channel:
             embed = discord.Embed(
                 title="🗑️ Reset XP",
-                description=f"**User:** {ctx.author.mention}\n**Target:** {member.mention}\n**Action:** Reset XP & Level",
-                color=discord.Color.red()
+                description=(
+                    f">>> **User:** {ctx.author.mention}\n"
+                    f"**Target:** {member.mention}\n"
+                    f"**Action:** Reset XP & Level"
+                ),
+                color=discord.Color.red()  # Using red color
             )
-            embed.set_footer(text=f"Executed by: {ctx.author.display_name}")
+
+            embed.set_footer(
+                text=f"{ctx.author.display_name} • {datetime.now().strftime('%I:%M %p')}"
+            )
+
             await log_channel.send(embed=embed)
 
         await ctx.send(f"✅ {member.mention}'s XP and level have been reset!")
     else:
         await ctx.send(f"⚠️ {member.mention} has no XP data yet!")
+
 
 #Rest the exp of all the member of server
 @bot.command(name="reset_all")
@@ -567,10 +657,17 @@ async def reset_all(ctx):
     if log_channel:
         embed = discord.Embed(
             title="🗑️ Reset All XP",
-            description=f"**User:** {ctx.author.mention}\n**Action:** Reset XP & Levels for all members",
-            color=discord.Color.red()
+            description=(
+                f">>> **User:** {ctx.author.mention}\n"
+                f"**Action:** Reset XP & Levels for all members"
+            ),
+            color=discord.Color.red()  # Using red color
         )
-        embed.set_footer(text=f"Executed by: {ctx.author.display_name}")
+
+        embed.set_footer(
+            text=f"{ctx.author.display_name} • {datetime.now().strftime('%I:%M %p')}"
+        )
+
         await log_channel.send(embed=embed)
 
     await ctx.send("✅ All users' XP and levels have been reset!")
@@ -600,10 +697,18 @@ async def addxp(ctx, member: discord.Member, amount: int):
     if log_channel:
         embed = discord.Embed(
             title="➕ Added XP",
-            description=f"**User:** {ctx.author.mention}\n**Target:** {member.mention}\n**XP Added:** {amount}",
-            color=discord.Color.green()
+            description=(
+                f">>> **User:** {ctx.author.mention}\n"
+                f"**Target:** {member.mention}\n"
+                f"**XP Added:** {amount}"
+            ),
+            color=discord.Color.red()  # Using red color
         )
-        embed.set_footer(text=f"Executed by: {ctx.author.display_name}")
+
+        embed.set_footer(
+            text=f"{ctx.author.display_name} • {datetime.now().strftime('%I:%M %p')}"
+        )
+
         await log_channel.send(embed=embed)
     
 
@@ -656,7 +761,7 @@ async def aboutowner(ctx):
 @bot.command()
 @commands.has_permissions(administrator=True)  
 async def purge(ctx, amount: int):
-    if amount <= 100:  
+    if amount <= 100:  # Prevent abuse, set a limit
         deleted = await ctx.channel.purge(limit=amount + 1)  
         await ctx.send(f"✅ Deleted {len(deleted)} messages!", delete_after=3)
         
@@ -665,13 +770,16 @@ async def purge(ctx, amount: int):
             embed = discord.Embed(
                 title="🗑️ Purge Command Used",
                 description=(
-                    f"**User:** {ctx.author.mention}\n"
+                    f">>> **User:** {ctx.author.mention}\n"
                     f"**Messages Deleted:** {len(deleted)}\n"
                     f"**Channel:** {ctx.channel.mention}"
                 ),
-                color=discord.Color.orange()
+                color=discord.Color.red()  # Using red color
             )
-            embed.set_footer(text=f"Executed by: {ctx.author.display_name}")
+
+            embed.set_footer(
+                text=f"{ctx.author.display_name}• {datetime.now().strftime('%I:%M %p')}"
+            )
             await log_channel.send(embed=embed)
 
     else:
@@ -846,10 +954,17 @@ async def on_raw_reaction_add(payload):
         if log_channel:
             embed = discord.Embed(
                 title="Role Assigned",
-                description=f"**User:** {member.mention}\n**Role:** {role.name}",
-                color=discord.Color.green()
+                description=(
+                    f">>> **User:** {member.mention}\n"
+                    f"**Role:** {role.name}"
+                ),
+                color=discord.Color.blurple()  # Correct blurple color
             )
-            embed.set_footer(text=f"Assigned by: {member.display_name}")
+
+            embed.set_footer(
+                text=f"Assigned by: {member.display_name} • {datetime.now().strftime('%I:%M %p')}"
+            )
+
             await log_channel.send(embed=embed)
 
 
@@ -880,14 +995,45 @@ async def on_raw_reaction_remove(payload):
         if log_channel:
             embed = discord.Embed(
                 title="Role Removed",
-                description=f"**User:** {member.mention}\n**Role:** {role.name}",
-                color=discord.Color.red()
+                description=(
+                    f">>> **User:** {member.mention}\n"
+                    f"**Role:** {role.name}"
+                ),
+                color=discord.Color.blurple()  # Using blurple color
             )
-            embed.set_footer(text=f"Removed by: {member.display_name}")
+
+            embed.set_footer(
+                text=f"Removed by: {member.display_name} • {datetime.now().strftime('%I:%M %p')}"
+            )
             await log_channel.send(embed=embed)
 
 
 
+
+
+
+
+async def test_embed(ctx, member: discord.Member = None):
+    welcome_channel_id = 1286649056252264489 # Replace with your actual welcome channel ID
+    channel = member.guild.get_channel(welcome_channel_id)
+
+
+    embed = discord.Embed(
+        title="<a:rocket_animated:1296099979961696329> Welcome to Defender xD की सेना",
+        description= f"<a:Arrow_right:1351456353037586475> Welcome {member.mention} to Defender xD की सेना!\n\n"
+                    "<a:Arrow_right:1351456353037586475> Make sure to read **Server Rules**.\n"
+                    "<a:Arrow_right:1351456353037586475> Explore the **https://discord.com/channels/1286631860197392396/1287005214049697822** and **https://discord.com/channels/1286631860197392396/1286638647936028774** channels.",
+        color=0xE6E6FA
+    )
+    avatar_url = member.avatar.url if member.avatar else member.default_avatar.url
+
+    embed.set_author(name=f"@{member.display_name}", icon_url=avatar_url)
+    embed.set_image(url="https://i.postimg.cc/RZJJMRTD/cropped-for-discord-server.jpg")  # Add a banner image if needed
+    embed.set_thumbnail(url="https://i.postimg.cc/mD5mFj0F/channels4-profile.jpg")
+    embed.set_footer(text="Enjoy your stay!")
+
+    await channel.send(embed=embed)
+    
 #If the bot by chances restart then the buttons wont work for then its there (only for appeal ticket)
 @bot.command(name="unbanappeal")
 @commands.has_permissions(administrator=True)
@@ -914,7 +1060,22 @@ async def unban_appeal(ctx):
     try:
         await main_guild.unban(discord.Object(id=user_id))
         try:
-            await user.send(f"✅ You have been unbanned from {main_guild.name}. You can rejoin using this link: {MAINSERVER}")
+            try:
+                embed = discord.Embed(
+                    title="✅ You Have Been Unbanned",
+                    description=(
+                        f">>> **Server:** {main_guild.name}\n"
+                        f"**Rejoin Link:** {MAINSERVER}"
+                    ),
+                    color=discord.Color.green()
+                )
+                embed.set_footer(text="Unban issued by Moderation Team")
+
+                await user.send(embed=embed)
+            except discord.Forbidden:
+                print(f"[WARNING] ⚠️ {user} has DMs closed. Skipping notification.")
+                pass  # Ignore if DMs are closed
+
         except discord.Forbidden:
             await ctx.send("⚠️ Unable to send DM. The user may have DMs disabled.", delete_after=5)
     except discord.NotFound:
@@ -1172,6 +1333,204 @@ async def add_usersupp(ctx, user_id: int):
 # ⚠️ Do not modify this section — it's handled internally by the bot and requires no changes from your side.
 
 
+class AddUserSelect(discord.ui.Select):
+    def __init__(self, interaction: discord.Interaction, channel: discord.VoiceChannel):
+        options = [
+            discord.SelectOption(label=member.display_name, value=str(member.id))
+            for member in interaction.guild.members if member.id != interaction.user.id
+        ]
+
+        self.channel = channel  # Store the channel object for later use
+        super().__init__(
+            placeholder="Select a user to add to your VC...",
+            options=options,
+            custom_id="add_user_select"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        member_id = int(self.values[0])  # Get the user ID from the select menu
+        member = interaction.guild.get_member(member_id)
+
+        if member:
+            await self.channel.set_permissions(member, connect=True, view_channel=True)
+            await interaction.response.send_message(f"✅ {member.display_name} has been added to the VC.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Could not find the selected user.", ephemeral=True)
+
+
+class BanUserSelect(discord.ui.Select):
+    def __init__(self, interaction: discord.Interaction, channel: discord.VoiceChannel):
+        options = [
+            discord.SelectOption(label=member.display_name, value=str(member.id))
+            for member in channel.members if member.id != interaction.user.id
+        ]
+
+        super().__init__(
+            placeholder="Select a user to ban...",
+            options=options,
+            custom_id="ban_user_select"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        target_id = int(self.values[0])
+        target = interaction.guild.get_member(target_id)
+        channel = interaction.guild.get_channel(user_vcs.get(interaction.user.id))
+
+        if channel and target:
+            await target.move_to(None)
+            await channel.set_permissions(target, connect=False)
+            banned_users.setdefault(interaction.user.id, []).append(target.id)
+            await interaction.response.send_message(f"✅ {target.display_name} has been banned from the VC.", ephemeral=True)
+
+class VCPanel(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Lock VC", style=discord.ButtonStyle.danger, custom_id="vc_lock")
+    async def lock_vc(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in user_vcs:
+            await interaction.response.send_message("❌ You don't own a voice channel right now.", ephemeral=True)
+            return
+
+        channel_id = user_vcs[interaction.user.id]
+        channel = interaction.guild.get_channel(channel_id)
+        await channel.set_permissions(interaction.guild.default_role, connect=False)
+        await interaction.response.send_message("✅ VC is now locked.", ephemeral=True)
+
+    @discord.ui.button(label="Unlock VC", style=discord.ButtonStyle.success, custom_id="vc_unlock")
+    async def unlock_vc(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in user_vcs:
+            await interaction.response.send_message("❌ You don't own a voice channel right now.", ephemeral=True)
+            return
+
+        channel_id = user_vcs[interaction.user.id]
+        channel = interaction.guild.get_channel(channel_id)
+        await channel.set_permissions(interaction.guild.default_role, connect=True)
+        await interaction.response.send_message("✅ VC is now unlocked.", ephemeral=True)
+
+    @discord.ui.button(label="Hide VC", style=discord.ButtonStyle.danger, custom_id="vc_hide")
+    async def hide_vc(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in user_vcs:
+            await interaction.response.send_message("❌ You don't own a voice channel right now.", ephemeral=True)
+            return
+
+        channel = interaction.guild.get_channel(user_vcs[interaction.user.id])
+        await channel.set_permissions(interaction.guild.default_role, view_channel=False)
+        await interaction.response.send_message("✅ VC is now hidden.", ephemeral=True)
+
+    @discord.ui.button(label="Unhide VC", style=discord.ButtonStyle.success, custom_id="vc_unhide")
+    async def unhide_vc(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in user_vcs:
+            await interaction.response.send_message("❌ You don't own a voice channel right now.", ephemeral=True)
+            return
+
+        channel = interaction.guild.get_channel(user_vcs[interaction.user.id])
+        perms = channel.overwrites_for(interaction.guild.default_role)
+        connect_state = perms.connect
+        await channel.set_permissions(interaction.guild.default_role, view_channel=True, connect=connect_state)
+        await interaction.response.send_message("✅ VC is now visible to everyone.", ephemeral=True)
+
+    @discord.ui.button(label="Add User", style=discord.ButtonStyle.primary, custom_id="vc_add_user")
+    async def add_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in user_vcs:
+            await interaction.response.send_message("❌ You don't own a voice channel right now.", ephemeral=True)
+            return
+
+        channel = interaction.guild.get_channel(user_vcs[interaction.user.id])
+
+        # Display the select menu to add a user
+        view = discord.ui.View(timeout=30)
+        view.add_item(AddUserSelect(interaction, channel))
+        await interaction.response.send_message("Select a user to add:", view=view, ephemeral=True)
+
+    @discord.ui.button(label="Ban User", style=discord.ButtonStyle.danger, custom_id="vc_ban_user")
+    async def ban_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in user_vcs:
+            await interaction.response.send_message("❌ You don't own a voice channel right now.", ephemeral=True)
+            return
+
+        channel = interaction.guild.get_channel(user_vcs[interaction.user.id])
+        if not channel or len(channel.members) <= 1:
+            await interaction.response.send_message("❌ No one else is in your VC to ban.", ephemeral=True)
+            return
+
+        view = discord.ui.View(timeout=30)
+        view.add_item(BanUserSelect(interaction, channel))
+        await interaction.response.send_message("Select a user to ban:", view=view, ephemeral=True)
+
+    @discord.ui.button(label="Rename VC", style=discord.ButtonStyle.secondary, custom_id="vc_rename")
+    async def rename_vc(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in user_vcs:
+            await interaction.response.send_message("❌ You don't own a voice channel right now.", ephemeral=True)
+            return
+
+        class RenameModal(discord.ui.Modal, title="Rename Voice Channel"):
+            new_name = discord.ui.TextInput(label="New VC Name")
+
+            async def on_submit(self, i: discord.Interaction):
+                vc = interaction.guild.get_channel(user_vcs[interaction.user.id])
+                await vc.edit(name=self.new_name.value)
+                await i.response.send_message("✅ VC renamed.", ephemeral=True)
+
+        await interaction.response.send_modal(RenameModal())
+
+    @discord.ui.button(label="Set Bitrate", style=discord.ButtonStyle.secondary, custom_id="vc_bitrate")
+    async def set_bitrate(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in user_vcs:
+            await interaction.response.send_message("❌ You don't own a voice channel right now.", ephemeral=True)
+            return
+
+        class BitrateModal(discord.ui.Modal, title="Set Voice Channel Bitrate"):
+            bitrate = discord.ui.TextInput(label="Bitrate (kbps)", placeholder="8 to 96 ")
+
+            async def on_submit(self, i: discord.Interaction):
+                vc = interaction.guild.get_channel(user_vcs[interaction.user.id])
+                try:
+                    kbps = int(self.bitrate.value)
+                    await vc.edit(bitrate=kbps * 1000)
+                    await i.response.send_message(f"✅ Bitrate set to {kbps} kbps.", ephemeral=True)
+                except:
+                    await i.response.send_message("❌ Invalid bitrate value.", ephemeral=True)
+
+        await interaction.response.send_modal(BitrateModal())
+
+
+
+
+
+async def send_vc_control_panel_embed(panel_channel):
+    # Clear the existing messages in the panel channel
+    await panel_channel.purge(limit=100)  # Adjust the limit based on how many messages you want to delete
+
+    # Create a beautiful embed with styling and a clean layout
+    embed = discord.Embed(
+        title=" Voice Channel Control Panel ",  # Added emojis for a better look
+        description="Welcome to the **Voice Channel Control Panel**! Use the buttons below to manage your voice channels and settings.",
+        color=discord.Color(0x3498db)  # Changed the color to a more appealing blue
+    )
+
+    # Set the server thumbnail (server's profile picture)
+    embed.set_thumbnail(url=panel_channel.guild.icon.url)
+
+    # Add a rich header with formatting and a slight drop shadow
+    embed.add_field(
+        name=" Features:", 
+        value="- **Lock**/Unlock your VC\n- **Hide**/Unhide VC\n- **Add/Remove Users**\n- **Ban Users**\n- **Rename VC**\n- **Change Bitrate**",
+        inline=False
+    )
+
+    # Add a footer with the bot's name or any custom message
+    embed.set_footer(
+        text="Voice Channel Control by Defender XD | Powered by DefenderBot", 
+        icon_url=panel_channel.guild.icon.url
+    )
+
+
+
+    # Send the embed with the VC Panel view
+    msg = await panel_channel.send(embed=embed, view=VCPanel())
+    return msg
+
 class TicketControls(View):
     def __init__(self, member, appeal_ticket, main_ticket, bot):
         super().__init__(timeout=None)
@@ -1190,7 +1549,23 @@ class TicketControls(View):
         guild = interaction.guild
         try:
             await guild.unban(discord.Object(id=self.member.id))
-            await self.member.send(f"✅ You have been unbanned from {guild.name}. You can rejoin using this link: {MAINSERVER}")
+            try:
+                embed = discord.Embed(
+                    title="✅ You Have Been Unbanned",
+                    description=(
+                        f">>> **Server:** {guild.name}\n"
+                        f"**Rejoin Link:** {MAINSERVER}"
+                    ),
+                    color=discord.Color.green()
+                )
+                embed.set_footer(text="Unban issued by Moderation Team")
+                
+                await self.member.send(embed=embed)
+            except discord.Forbidden:
+                print(f"[WARNING] ⚠️ {self.member} has DMs closed. Skipping notification.")
+                pass  # Ignore if DMs are closed
+
+
             await interaction.response.send_message("✅ User has been unbanned.", ephemeral=True)
             appeal_guild = self.bot.get_guild(APPEAL_SERVER_ID)
             member = appeal_guild.get_member(self.member.id)
@@ -1402,21 +1777,84 @@ class AppealButton(View):
 
 @bot.event
 async def on_ready():
-    await bot.tree.sync() 
-    print(f"✅ Synced Slash Commands! Logged in as {bot.user}")
-    await send_appeal_message()
-    await send_ticket_embed()  # 👈 We just call it here
-    for guild in bot.guilds:
-        await notify_ticket_channels_on_restart(guild)
-    if setup_channel_id:
-        setup_channel = bot.get_channel(setup_channel_id)
-        if setup_channel:
-            async for message in setup_channel.history(limit=100):
-                await message.delete()
-            embed = discord.Embed(title="Ban Appeal", description="Click the button below to create a ban appeal ticket.", color=discord.Color.red())
-            view = AppealButton()
-            await setup_channel.send(embed=embed, view=view)
-            await setup_channel.send("⚠️ **IF DISCORD BOT IS OFFLINE, PLEASE WAIT OR DM THE ADMIN**")
+    try:
+        await bot.tree.sync()
+        print(f"✅ Synced Slash Commands! Logged in as {bot.user}")
+        await send_appeal_message()
+        await send_ticket_embed()
+        for guild in bot.guilds:
+            await notify_ticket_channels_on_restart(guild)
+        if setup_channel_id:
+            setup_channel = bot.get_channel(setup_channel_id)
+            if setup_channel:
+                async for message in setup_channel.history(limit=100):
+                    await message.delete()
+                embed = discord.Embed(title="Ban Appeal", description="Click the button below to create a ban appeal ticket.", color=discord.Color.red())
+                view = AppealButton()
+                await setup_channel.send(embed=embed, view=view)
+                await setup_channel.send("⚠️ **IF DISCORD BOT IS OFFLINE, PLEASE WAIT OR DM THE ADMIN**")
+            guild = bot.get_guild(GUILD_ID)
+        category = guild.get_channel(VC_CATEGORY_ID)
+        panel_channel = guild.get_channel(PANEL_CHANNEL_ID)
+
+        if not discord.utils.get(guild.voice_channels, name=JOIN_CHANNEL_NAME):
+            await guild.create_voice_channel(JOIN_CHANNEL_NAME, category=category)
+
+        global panel_message_id
+        try:
+            if panel_message_id:
+                msg = await panel_channel.fetch_message(panel_message_id)
+                await msg.edit(content="Voice Channel Control Panel", view=VCPanel())
+            else:
+                # Call the function to send the VC Control Panel embed
+                msg = await send_vc_control_panel_embed(panel_channel)
+                panel_message_id = msg.id
+        except discord.NotFound:
+            # Call the function to send the VC Control Panel embed
+            msg = await send_vc_control_panel_embed(panel_channel)
+            panel_message_id = msg.id
+
+        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        print(f"✅ Bot ready in {guild.name}")
+
+    
+    except HTTPException as e:
+        if e.status == 429:
+            print("Rate limit reached, retrying after a delay...")
+            time.sleep(60)  # Sleep for 60 seconds before retrying
+            await bot.close()  # Close and reconnect the bot
+
+
+
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if after.channel and after.channel.name == JOIN_CHANNEL_NAME:
+        guild = after.channel.guild
+        category = guild.get_channel(VC_CATEGORY_ID)
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(connect=False),
+            member: discord.PermissionOverwrite(connect=True, manage_channels=True)
+        }
+
+        vc = await guild.create_voice_channel(
+            name=f"{member.name}'s Room",
+            overwrites=overwrites,
+            category=category
+        )
+
+        user_vcs[member.id] = vc.id
+        await member.move_to(vc)
+
+    if before.channel and before.channel.id in user_vcs.values() and len(before.channel.members) == 0:
+        await before.channel.delete()
+        for user_id, chan_id in list(user_vcs.items()):
+            if chan_id == before.channel.id:
+                del user_vcs[user_id]
+                break
+        print(f"✅ VC {before.channel.name} deleted as it's empty.")
+
 
 async def mute_purge(channel, member, mute_time=120, reason="Spamming messages (Auto Moderation)"):
     """Mutes a user and deletes their messages from the last 30 seconds."""
@@ -1427,7 +1865,18 @@ async def mute_purge(channel, member, mute_time=120, reason="Spamming messages (
 
         # Notify user via DM
         try:
-            await member.send(f":mute: You have been muted in **{member.guild.name}** for {mute_time} minutes.\n**Reason:** {reason}")
+            embed = discord.Embed(
+                title="You Have Been Muted",
+                description=(
+                    f">>> **Server:** {member.guild.name}\n"
+                    f"**Duration:** {mute_time} minutes\n"
+                    f"**Reason:** {reason}"
+                ),
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Contact a moderator if you have any questions.")
+            
+            await member.send(embed=embed)
         except discord.Forbidden:
             print(f"[WARNING] ⚠️ {member} has DMs closed. Skipping notification.")
             pass  # Ignore if DMs are closed
@@ -1450,17 +1899,20 @@ async def mute_purge(channel, member, mute_time=120, reason="Spamming messages (
         log_channel = channel.guild.get_channel(ADMIN_LOG_CHANNEL_ID)
         if log_channel:
             embed = discord.Embed(
-                title=":rotating_light: Auto Moderation",
+                title="<a:alert1:1296099974064640060> Auto Moderation",
                 description=(
-                    f"**:bust_in_silhouette: User:** {member.mention}\n"
-                    f"**:hourglass_flowing_sand: Duration:** {mute_time} minutes\n"
-                    f"**:pushpin: Reason:** {reason}\n"
-                    f"**:link: Channel:** {channel.mention}\n"
-                    f"**:wastebasket: Messages Deleted:** {len(deleted)}"
+                    f">>> **User:** {member.mention}\n"
+                    f"**Duration:** {mute_time} minutes\n"
+                    f"**Reason:** {reason}\n"
+                    f"**Channel:** {channel.mention}\n"
+                    f"**Messages Deleted:** {len(deleted)}"
                 ),
-                color=discord.Color.orange()
+                color=discord.Color.red()
             )
-            embed.set_footer(text=f"Muted by: {channel.guild.me.display_name}")
+
+            embed.set_footer(
+                text=f"{channel.guild.me.display_name} • {datetime.now().strftime('%I:%M %p')}"
+            )
 
             await log_channel.send(embed=embed)
 
@@ -1492,6 +1944,9 @@ async def on_member_join(member):
     except Exception as e:
         print(f"Unexpected error: {e}")
     
+    main_server_id = GUILD_ID  # Main server where you want the welcome message
+    if member.guild.id == main_server_id:  # Ensure it's the main server
+        await test_embed(None, member)  # Call your function
 
 
 
@@ -1748,7 +2203,7 @@ class TicketView(discord.ui.View):
         embed = discord.Embed(
             description="Support will be with you shortly.\nAdmins can control the ticket using the buttons below.",
             color=discord.Color.green(),
-            timestamp=datetime.utcnow()
+            timestamp = datetime.now()
         )
         embed.set_footer(text="Support Team • Defender_XD")
 
@@ -1758,7 +2213,7 @@ class TicketView(discord.ui.View):
 
 class TicketStaffView(discord.ui.View):
     def __init__(self, ticket_channel: discord.TextChannel):
-        super().__init__()
+        super().__init__(timeout=None)
         self.ticket_channel = ticket_channel
 
     @discord.ui.button(label="❌ Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket")
@@ -1863,7 +2318,7 @@ async def send_transcript_log(channel: discord.TextChannel, moderator: discord.M
     embed = discord.Embed(
         title="🎟️ Ticket Closed",
         color=discord.Color.dark_gray(),
-        timestamp=datetime.utcnow()
+        timestamp = datetime.now()
     )
     embed.set_author(name=moderator.display_name, icon_url=moderator.display_avatar.url)
     embed.add_field(name="Ticket Owner", value=f"{ticket_owner.mention}", inline=True)
@@ -2079,11 +2534,24 @@ async def ban(ctx, member: discord.Member, *, reason_with_proof="No reason provi
     proof_message_id = parts[1].strip() if len(parts) > 1 else None
 
 
-    # Attempt to DM the banned user
+        # Attempt to DM the banned user
     try:
-        await member.send(f"❌ You have been permanently banned from {ctx.guild.name} for: {reason}\nYou can appeal here: {APPEAL_SERVER_INVITE}")
-    except:
-        pass
+        embed = discord.Embed(
+            title="❌ You Have Been Permanently Banned",
+            description=(
+                f">>> **Server:** {ctx.guild.name}\n"
+                f"**Reason:** {reason}\n"
+                f"**Appeal Link:** {APPEAL_SERVER_INVITE}"
+            ),
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Ban issued by Moderation Team")
+        
+        await member.send(embed=embed)
+    except discord.Forbidden:
+        print(f"[WARNING] ⚠️ {member} has DMs closed. Skipping notification.")
+        pass  # Ignore if DMs are closed
+
 
     # Fetch the log channel
     log_channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID)
@@ -2104,14 +2572,18 @@ async def ban(ctx, member: discord.Member, *, reason_with_proof="No reason provi
 
         # Create embed with proof
         embed = discord.Embed(
-            title="🚨 User Banned",
+            title="<a:alert1:1296099974064640060> User Banned",
             description=(
-                f"**👤 User:** {member.mention}\n\n"
-                f"**📄 Reason:** {reason}\n\n"
-                f"**🛠️ Moderator:** {ctx.author.mention}\n\n"
-                f"**🧾 Proof (User Message):**\n{proof_message_content}"
+                f">>> **User:** {member.mention}\n\n"
+                f"**Reason:** {reason}\n\n"
+                f"**Moderator:** {ctx.author.mention}\n\n"
+                f"**Proof (User Message):**\n{proof_message_content}"
             ),
             color=discord.Color.red()
+        )
+
+        embed.set_footer(
+            text=f"{ctx.bot.user.display_name} • {datetime.now().strftime('%I:%M %p')}"
         )
 
         await log_channel.send(embed=embed)
@@ -2137,10 +2609,18 @@ async def unban(ctx, user_id: int):
         log_channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID)
         if log_channel:
             embed = discord.Embed(
-                title="🚨 User Unbanned",
-                description=f"**👤 User:** {user.mention} (`{user.id}`)\n\n**🛠️ Unbanned by:** {ctx.author.mention}",
+                title="<a:alert1:1296099974064640060> User Unbanned",
+                description=(
+                    f">>> **User:** {user.mention} (`{user.id}`)\n\n"
+                    f"**Unbanned by:** {ctx.author.mention}"
+                ),
                 color=discord.Color.green()
             )
+
+            embed.set_footer(
+                text=f"{ctx.bot.user.display_name} • {datetime.now().strftime('%I:%M %p')}"
+            )
+
             await log_channel.send(embed=embed)
 
     except discord.NotFound:
@@ -2156,9 +2636,24 @@ async def unban(ctx, user_id: int):
 async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
     # Notify the user via DM
     try:
-        await member.send(f"⚠️ You have been kicked from {ctx.guild.name} by {ctx.author.mention} for: {reason}")
-    except:
-        pass  # Ignore if DMs are closed
+        embed = discord.Embed(
+            title="⚠️ You Have Been Kicked",
+            description=(
+                f">>> **Server:** {ctx.guild.name}\n"
+                f"**Kicked By:** {ctx.author.mention}\n"
+                f"**Reason:** {reason}"
+            ),
+            color=discord.Color.orange()
+        )
+        embed.set_footer(text="If you believe this was a mistake, contact a moderator.")
+        
+        await member.send(embed=embed)
+    except discord.Forbidden:
+        print(f"[WARNING] ⚠️ {member} has DMs closed. Skipping notification.")
+
+    except discord.HTTPException as e:
+        print(f"[ERROR] Failed to send DM to {member.display_name}: {e}")
+
 
     # Kick the user
     await member.kick(reason=reason)
@@ -2168,12 +2663,19 @@ async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
     log_channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID)
     if log_channel:
         embed = discord.Embed(
-            title="🚨 User Kicked",
-            description=f"**👤 User:** {member.mention} (`{member.id}`)\n\n"
-                        f"**📄 Reason:** {reason}\n\n"
-                        f"**🛠️ Kicked by:** {ctx.author.mention} (`{ctx.author.id}`)",
+            title="<a:alert1:1296099974064640060> User Kicked",
+            description=(
+                f">>> **User:** {member.mention} (`{member.id}`)\n\n"
+                f"**Reason:** {reason}\n\n"
+                f"**Kicked by:** {ctx.author.mention} (`{ctx.author.id}`)"
+            ),
             color=discord.Color.orange()
         )
+
+        embed.set_footer(
+            text=f"{ctx.bot.user.display_name} • {datetime.now().strftime('%I:%M %p')}"
+        )
+
         await log_channel.send(embed=embed)
 
     # Delete the command message
@@ -2210,9 +2712,22 @@ async def mute(ctx, member: discord.Member, time: int, *, reason="No reason prov
 
         # Send DM to the user
         try:
-            await member.send(f"🔇 You have been muted in **{ctx.guild.name}** for {time} minutes.\n**Reason:** {reason}")
+            embed = discord.Embed(
+                title="🔇 You Have Been Muted",
+                description=(
+                    f">>> **Server:** {ctx.guild.name}\n"
+                    f"**Mute Duration:** {time} minutes\n"
+                    f"**Reason:** {reason}"
+                ),
+                color=discord.Color.orange()
+            )
+            embed.set_footer(text="Mute issued by Moderation Team")
+
+            await member.send(embed=embed)
         except discord.Forbidden:
+            print(f"[WARNING] ⚠️ {member} has DMs closed. Skipping notification.")
             pass  # Ignore if DMs are closed
+
 
         await ctx.send(f"🔇 {member.mention} has been muted for {time} minutes. Reason: {reason}")
 
@@ -2226,15 +2741,20 @@ async def mute(ctx, member: discord.Member, time: int, *, reason="No reason prov
         log_channel = ctx.guild.get_channel(ADMIN_LOG_CHANNEL_ID)
         if log_channel:
             embed = discord.Embed(
-                title="🔇 User Muted",
+                title="<a:alert1:1296099974064640060> User Muted",
                 description=(
-                    f"**👤 User:** {member.mention} (`{member.id}`)\n"
-                    f"**📄 Reason:** {reason}\n"
-                    f"**⏳ Duration:** {time} minutes\n"
-                    f"**🛠️ Muted by:** {ctx.author.mention}"
+                    f">>> **User:** {member.mention} (`{member.id}`)\n"
+                    f"**Reason:** {reason}\n"
+                    f"**Duration:** {time} minutes\n"
+                    f"**Muted by:** {ctx.author.mention}"
                 ),
-                color=discord.Color.red(),
+                color=discord.Color.red()
             )
+
+            embed.set_footer(
+                text=f"{ctx.bot.user.display_name} • {datetime.now().strftime('%I:%M %p')}"
+            )
+
             await log_channel.send(embed=embed)
 
     except Exception as e:
@@ -2250,9 +2770,18 @@ async def unmute(ctx, member: discord.Member):
 
         # Send DM to the user
         try:
-            await member.send(f"🔊 You have been unmuted in **{ctx.guild.name}**.")
+            embed = discord.Embed(
+                title="🔊 You Have Been Unmuted",
+                description=f">>> **Server:** {ctx.guild.name}",
+                color=discord.Color.green()
+            )
+            embed.set_footer(text="Unmute issued by Moderation Team")
+
+            await member.send(embed=embed)
         except discord.Forbidden:
+            print(f"[WARNING] ⚠️ {member} has DMs closed. Skipping notification.")
             pass  # Ignore if DMs are closed
+
 
         await ctx.send(f"✅ {member.mention} has been unmuted.",delete_after=3)
 
@@ -2266,10 +2795,18 @@ async def unmute(ctx, member: discord.Member):
         log_channel = ctx.guild.get_channel(ADMIN_LOG_CHANNEL_ID)
         if log_channel:
             embed = discord.Embed(
-                title="🔊 User Unmuted",
-                description=f"**👤 User:** {member.mention} (`{member.id}`)\n**🛠️ Unmuted by:** {ctx.author.mention}",
-                color=discord.Color.green(),
+                title=" User Unmuted",
+                description=(
+                    f">>> **User:** {member.mention} (`{member.id}`)\n"
+                    f"**Unmuted by:** {ctx.author.mention}"
+                ),
+                color=discord.Color.green()
             )
+
+            embed.set_footer(
+                text=f"{ctx.bot.user.display_name} • {datetime.now().strftime('%I:%M %p')}"
+            )
+
             await log_channel.send(embed=embed)
 
     except Exception as e:
@@ -2319,7 +2856,18 @@ async def log_warning(ctx, user, reason, warns):
     elif warns >= 4:
         punishment = "Banned"
         try:
-            await user.send(f"❌ You have been permanently banned from {ctx.guild.name} for: {reason}\nYou can appeal here: {APPEAL_SERVER_INVITE}")
+            embed = discord.Embed(
+                title="You Have Been Permanently Banned",
+                description=(
+                    f">>> **Server:** {ctx.guild.name}\n"
+                    f"**Reason:** {reason}\n"
+                    f"**Appeal Link:** {APPEAL_SERVER_INVITE}"
+                ),
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Ban Issued by Moderation Team")
+
+            await user.send(embed=embed)
         except:
             pass
         await user.ban(reason="Reached 4 warnings")
@@ -2330,13 +2878,17 @@ async def log_warning(ctx, user, reason, warns):
     embed = discord.Embed(
         title="⚠️ User Warned",
         description=(
-            f"**User:** {user.mention}\n"
+            f">>> **User:** {user.mention}\n"
             f"**Reason:** {reason}\n"
             f"**Total Warnings:** {warns}\n"
             f"**Punishment:** {punishment}\n"
             f"**Moderator:** {moderator}\n"
         ),
         color=discord.Color.orange()
+    )
+
+    embed.set_footer(
+        text=f"{ctx.guild.me.display_name} • {datetime.now().strftime('%I:%M %p')}"
     )
 
     if log_channel:
@@ -2381,14 +2933,41 @@ async def warn(ctx, user: discord.Member, *, reason="No reason provided"):
         await user.edit(timed_out_until=duration)
         punishment = "Muted for 24 hours"
     elif warning_count >= 4:
-        await user.send(f"❌ You have been permanently banned from {ctx.guild.name} for: excessive warnings \nYou can appeal here: {APPEAL_SERVER_INVITE}")
+        try:
+            embed = discord.Embed(
+                title="❌ You Have Been Permanently Banned",
+                description=(
+                    f">>> **Server:** {ctx.guild.name}\n"
+                    f"**Reason:** Excessive warnings\n"
+                    f"**Appeal Link:** {APPEAL_SERVER_INVITE}"
+                ),
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Ban issued by Moderation Team")
+            
+            await user.send(embed=embed)
+        except discord.Forbidden:
+            print(f"[WARNING] ⚠️ {user} has DMs closed. Skipping notification.")
+            pass  # Ignore if DMs are closed
         await user.ban(reason=f"Excessive warnings ({warning_count} warnings). Reason: {reason}")
         punishment = "Banned from the server"
 
     try:
-        await user.send(f"⚠️ You have been warned in **{ctx.guild.name}**.\n**Reason:** {reason}\n**Total Warnings:** {warning_count}\n**🚨 Punishment:** {punishment if punishment else 'None'}")
+        embed = discord.Embed(
+            title="⚠️ You Have Been Warned",
+            description=(
+                f">>> **Server:** {ctx.guild.name}\n"
+                f"**Reason:** {reason}\n"
+                f"**Total Warnings:** {warning_count}\n"
+                f"**Punishment:** {punishment if punishment else 'None'}\n"
+                f"**Warned By:** {ctx.author.display_name}"
+            ),
+            color=discord.Color.orange()
+        )
+        embed.set_footer(text="Contact server staff if you believe this was a mistake.")
+        await user.send(embed=embed)
     except discord.Forbidden:
-        pass  
+        pass
 
     try:
         await ctx.send(f"⚠️ {user.mention} has been warned. Reason: {reason}\nTotal Warnings: {warning_count}\nPunishment: {punishment if punishment else 'None'}",delete_after=3)
@@ -2418,13 +2997,18 @@ async def clearwarn(ctx, user: discord.Member):
     await ctx.send(f"Cleared warnings for {user.mention}",delete_after=3)
     log_channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID)
     embed = discord.Embed(
-        title="⚠️ User Warnning Cleared",
+        title="⚠️ User Warning Cleared",
         description=(
-            f"**User:** {user.mention}\n"
+            f">>> **User:** {user.mention}\n"
             f"**Moderator:** {ctx.author.mention}"
         ),
         color=discord.Color.orange()
     )
+
+    embed.set_footer(
+        text=f"{ctx.bot.user.display_name} • {datetime.now().strftime('%I:%M %p')}"
+    )
+
     await log_channel.send(embed=embed)
 
     await ctx.message.delete()
@@ -2447,13 +3031,18 @@ async def insta_noti(ctx, link: str):
         
     log_channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID)
     embed = discord.Embed(
-        title="Instagram Notification command used ",
+        title="⚠️ Instagram Notification Command Used",
         description=(
-            f"**Link:**{link}\n"
+            f">>> **Link:** {link}\n"
             f"**Moderator:** {ctx.author.mention}"
         ),
         color=discord.Color.orange()
     )
+
+    embed.set_footer(
+        text=f"{ctx.bot.user.display_name} • {datetime.now().strftime('%I:%M %p')}"
+    )
+
     await log_channel.send(embed=embed)
 
 
@@ -2571,86 +3160,65 @@ async def leaderboard(interaction: discord.Interaction):
 # ========================== BOT CORE ==========================
 # ❤️ The heart of the Discord bot — do not touch this section!
 
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-        # Ignore XP gain for users with the specified role
+async def handle_xp_system(message):
     if NO_XP_ROLE_ID in [role.id for role in message.author.roles]:
-        return await bot.process_commands(message)  # Still allow commands
+        return
 
     xp_data = load_xp_data()
     user_id = message.author.id
 
-    # Get user stats or initialize
     user_stats = xp_data.get(user_id, {"xp": 0, "level": 1})
+    user_stats["xp"] += XP_PER_MESSAGE
 
-    # Add a fixed XP amount per message
-    user_stats["xp"] += XP_PER_MESSAGE  # Example: XP_PER_MESSAGE = 15
-
-    # Check if user leveled up
     next_xp = xp_needed(user_stats["level"])
     if user_stats["xp"] >= next_xp:
         user_stats["level"] += 1
-        user_stats["xp"] = 0  # Reset XP
+        user_stats["xp"] = 0
         botchannel = message.guild.get_channel(BOT_COMMAND_ID)
         await botchannel.send(f"🎉 {message.author.mention} leveled up to **Level {user_stats['level']}!**")
 
-    # Save updated XP and level
     xp_data[user_id] = user_stats
     save_xp_data(xp_data)
 
-    #1) Relay system
+async def handle_ticket_relay(message):
     for user_id, (appeal_ticket_id, main_ticket_id) in ticket_mappings.items():
         if message.channel.id == appeal_ticket_id:
             main_ticket = bot.get_channel(main_ticket_id)
             if main_ticket:
-                await main_ticket.send(f" ({message.author.mention}): {message.content}")
+                await main_ticket.send(f"({message.author.mention}): {message.content}")
         elif message.channel.id == main_ticket_id:
             appeal_ticket = bot.get_channel(appeal_ticket_id)
             if appeal_ticket:
                 await appeal_ticket.send(f"Admin : {message.content}")
-    user_roles = {role.id for role in message.author.roles}
 
-    # Ignore users with specific roles
-    user_roles = {role.id for role in message.author.roles}
 
-    # Ignore users with specific roles
+async def handle_automod(message):
+    user_roles = {role.id for role in message.author.roles}
     if user_roles & IGNORED_ROLES:
-        await bot.process_commands(message)
         return
 
-    #2 Detect links using regex
     if re.search(LINK_REGEX, message.content, re.IGNORECASE):
-
         if message.channel.id in BLOCKED_LINK_CHANNELS:
-            print("❌ Link posted in a restricted channel. Deleting...")
-
             await message.delete()
             await message.channel.send(f"{message.author.mention}, links are not allowed in this channel!", delete_after=3)
-
-            # Call warn function without using ctx
-            print(f"⚠️ Warning user: {message.author}")
             await warn(message, message.author, reason="Posting links in a restricted channel")
 
-    #3 Detect bad words using regex
     if any(word in message.content.lower() for word in BAD_WORDS) or BAD_WORDS_REGEX.search(message.content):
-        print("🚨 Bad word detected! Deleting message...")
         await message.delete()
         await message.channel.send(f"{message.author.mention}, watch your language!", delete_after=3)
-
-        # Call warn function
-        print(f"⚠️ Warning user: {message.author} for bad language")
         await warn(message, message.author, reason="Using inappropriate language")
-        return
 
-    # 5️⃣ Spam Protection System
+
+async def handle_spam_protection(message):
+    user_roles = {role.id for role in message.author.roles}
+    if user_roles & IGNORED_ROLES:
+        return
     user_id = message.author.id
     current_time = time.time()
 
     if user_id not in user_message_timestamps:
         user_message_timestamps[user_id] = []
-        user_messages[user_id] = []  # Store user messages for tracking
+        user_messages[user_id] = []
 
     user_message_timestamps[user_id].append(current_time)
     user_messages[user_id].append(message)
@@ -2658,39 +3226,41 @@ async def on_message(message):
     user_message_timestamps[user_id] = [t for t in user_message_timestamps[user_id] if current_time - t < SPAM_TIMEFRAME]
     user_messages[user_id] = [msg for msg in user_messages[user_id] if current_time - msg.created_at.timestamp() < SPAM_TIMEFRAME]
 
-    warning_cooldown = 10  
     last_warning_time = spam_warnings.get(user_id, 0)
 
-    # 6️⃣ Detect too many messages in a short time
     if len(user_message_timestamps[user_id]) > SPAM_MESSAGE_LIMIT:
-        if current_time - last_warning_time > warning_cooldown:
-            spam_warnings[user_id] = current_time  # Update last warning time
-            
-            # Call mute_purge() instead of deleting messages here
-            print(f"[DEBUG] 🚨 Spam detected for {message.author}! Calling mute_purge()...")  # Debugging log
+        if current_time - last_warning_time > 10:
+            spam_warnings[user_id] = current_time
             await mute_purge(message.channel, message.author, mute_time=120, reason="Spamming messages (Auto)")
-        
-        return         
-        return  
-    # 7️⃣ Detect repeated messages (e.g., "hello" multiple times)
+        return
+
     last_messages = [msg.content for msg in user_messages[user_id][-3:]]
     if len(last_messages) >= 3 and all(msg == message.content for msg in last_messages):
-        if current_time - last_warning_time > warning_cooldown:
-            spam_warnings[user_id] = current_time  
+        if current_time - last_warning_time > 10:
+            spam_warnings[user_id] = current_time
             for msg in user_messages[user_id]:
                 if msg.content == message.content:
                     try:
                         await msg.delete()
                     except discord.NotFound:
-                        pass  
-
+                        pass
             await message.channel.send(f"{message.author.mention}, stop repeating the same message!", delete_after=3)
             await mute_purge(message.channel, message.author, mute_time=120, reason="Spamming messages (Auto)")
-        
-        return  
 
+
+
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    await handle_xp_system(message)
+    await handle_ticket_relay(message)
+    await handle_automod(message)
+    await handle_spam_protection(message)
+    
     await bot.process_commands(message)
-
 
 bot.run(TOKEN)
 
