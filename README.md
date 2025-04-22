@@ -15,6 +15,7 @@ A powerful, multipurpose Discord bot built using `discord.py`. Packed with moder
 - 🎉 Booster detection
 - 🛡️ Custom auto mod with link filtering and role restrictions
 - 🧠 Interactive status system with livestream, video, DND, and more
+- Private Vc Functioning
 ---
 
 ## 🛠️ Setup Instructions
